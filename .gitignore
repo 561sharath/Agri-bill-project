@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+logs/
+*.log
+
+# Build / Distributions
+dist/
+coverage/
+
+# OS/IDE settings
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
