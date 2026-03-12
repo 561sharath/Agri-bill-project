@@ -1,12 +1,26 @@
 import Product from '../models/Product.js';
 
-// @desc    Get all products
+// @desc    Get all products with pagination
 // @route   GET /api/products
 // @access  Private
 export const getProducts = async (req, res, next) => {
     try {
-        const products = await Product.find({}).sort({ name: 1 });
-        res.json(products);
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const startIndex = (page - 1) * limit;
+
+        const totalRecords = await Product.countDocuments();
+        const products = await Product.find({})
+            .sort({ name: 1 })
+            .skip(startIndex)
+            .limit(limit);
+
+        res.json({
+            data: products,
+            page,
+            totalPages: Math.ceil(totalRecords / limit),
+            totalRecords
+        });
     } catch (error) {
         next(error);
     }

@@ -23,13 +23,10 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // ─── Monthly Revenue Bar Chart ───────────────────────────────────────────────
 export const MonthlyRevenueChart = ({ data }) => {
-    const chartData = data || [
-        { month: 'JAN', revenue: 82000 },
-        { month: 'FEB', revenue: 123000 },
-        { month: 'MAR', revenue: 113000 },
-        { month: 'APR', revenue: 175400 },
-        { month: 'MAY', revenue: 144000 },
-        { month: 'JUN', revenue: 196500 },
+    // Fallback if data is not provided or empty
+    const chartData = data && data.length > 0 ? data : [
+        { month: 'Q1', revenue: 0 },
+        { month: 'Q2', revenue: 0 }
     ];
 
     return (
@@ -55,25 +52,20 @@ export const MonthlyRevenueChart = ({ data }) => {
     );
 };
 
-// ─── Daily Sales Line/Area Chart ─────────────────────────────────────────────
-export const DailySalesChart = ({ data }) => {
-    const chartData = data || [
-        { day: 'MON', sales: 8500 },
-        { day: 'TUE', sales: 14200 },
-        { day: 'WED', sales: 6400 },
-        { day: 'THU', sales: 18700 },
-        { day: 'FRI', sales: 11300 },
-        { day: 'SAT', sales: 22100 },
-        { day: 'SUN', sales: 9800 },
+// ─── Weekly Revenue Line/Area Chart ───────────────────────────────────────────
+export const WeeklyRevenueChart = ({ data }) => {
+    const chartData = data && data.length > 0 ? data : [
+        { day: 'Mon', revenue: 0 },
+        { day: 'Tue', revenue: 0 }
     ];
 
     return (
         <div className="card p-5">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Daily Sales (Last 7 Days)</h3>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Weekly Revenue</h3>
             <ResponsiveContainer width="100%" height={160}>
                 <AreaChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <defs>
-                        <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#2f7f33" stopOpacity={0.2} />
                             <stop offset="95%" stopColor="#2f7f33" stopOpacity={0} />
                         </linearGradient>
@@ -82,7 +74,7 @@ export const DailySalesChart = ({ data }) => {
                     <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} tickLine={false} axisLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v / 1000).toFixed(0)}K`} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Area type="monotone" dataKey="sales" stroke="#2f7f33" strokeWidth={2.5} fill="url(#salesGrad)" dot={false} activeDot={{ r: 5, fill: '#2f7f33' }} />
+                    <Area type="monotone" dataKey="revenue" stroke="#2f7f33" strokeWidth={2.5} fill="url(#revenueGrad)" dot={false} activeDot={{ r: 5, fill: '#2f7f33' }} />
                 </AreaChart>
             </ResponsiveContainer>
         </div>
@@ -115,11 +107,11 @@ export const TopProductsChart = ({ data }) => {
                         <Tooltip formatter={(v) => [`${v}%`, '']} />
                     </PieChart>
                 </ResponsiveContainer>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 flex-1">
                     {chartData.map((entry, i) => (
                         <div key={i} className="flex items-center gap-2 text-xs">
                             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                            <span className="text-slate-600 dark:text-slate-400">{entry.name}</span>
+                            <span className="text-slate-600 dark:text-slate-400 truncate max-w-[100px]">{entry.name}</span>
                             <span className="font-bold text-slate-800 dark:text-slate-200 ml-auto">{entry.value}%</span>
                         </div>
                     ))}

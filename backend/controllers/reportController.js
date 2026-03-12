@@ -1,6 +1,7 @@
 import Bill from '../models/Bill.js';
 import Payment from '../models/Payment.js';
 import Product from '../models/Product.js';
+import Farmer from '../models/Farmer.js';
 
 // @desc    Get monthly sales report
 // @route   GET /api/reports/monthly-sales
@@ -75,6 +76,32 @@ export const getTopProducts = async (req, res, next) => {
         }));
 
         res.json(data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Get credit report (farmers with balance)
+// @route   GET /api/reports/credit
+// @access  Private
+export const getCreditReport = async (req, res, next) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const totalRecords = await Farmer.countDocuments({ creditBalance: { $gt: 0 } });
+        const farmers = await Farmer.find({ creditBalance: { $gt: 0 } })
+            .sort({ creditBalance: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            data: farmers,
+            page,
+            totalPages: Math.ceil(totalRecords / limit),
+            totalRecords
+        });
     } catch (error) {
         next(error);
     }

@@ -16,18 +16,9 @@ const Login = () => {
         e.preventDefault();
         setLoading(true);
         try {
-            if (email === 'admin@agribill.com' && password === '123456') {
-                // Demo fallback for instant login without backend
-                await new Promise(r => setTimeout(r, 800));
-                localStorage.setItem('agribill_token', 'demo_token_xyz123');
-                localStorage.setItem('agribill_user', JSON.stringify({ name: 'JD', email, role: 'Owner' }));
-                toast.success('Welcome to AgriBill!');
-                window.location.href = '/';
-            } else {
-                await login(email, password);
-                toast.success('Logged in successfully!');
-                navigate('/');
-            }
+            await login(email, password);
+            toast.success('Logged in successfully!');
+            navigate('/');
         } catch (err) {
             toast.error('Invalid credentials or network error.');
         } finally {

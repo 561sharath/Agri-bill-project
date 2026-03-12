@@ -40,19 +40,19 @@ export const authAPI = {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export const dashboardAPI = {
-    getStats: () => api.get('/dashboard/stats'),
-    getSalesChart: () => api.get('/dashboard/sales-chart'),
-    getMonthlyRevenue: () => api.get('/dashboard/monthly-revenue'),
+    getSummary: () => api.get('/dashboard/summary'),
 };
 
 // ─── Farmers ─────────────────────────────────────────────────────────────────
 export const farmersAPI = {
     getAll: (params) => api.get('/farmers', { params }),
     getById: (id) => api.get(`/farmers/${id}`),
+    search: (q) => api.get('/farmers/search', { params: { q } }),
     create: (data) => api.post('/farmers', data),
     update: (id, data) => api.put(`/farmers/${id}`, data),
     delete: (id) => api.delete(`/farmers/${id}`),
     getTransactions: (id) => api.get(`/farmers/${id}/transactions`),
+    exportHistory: (id) => api.get(`/farmers/${id}/export`, { responseType: 'blob' }),
 };
 
 // ─── Products ────────────────────────────────────────────────────────────────
@@ -79,6 +79,7 @@ export const paymentsAPI = {
     getAll: (params) => api.get('/payments', { params }),
     create: (data) => api.post('/payments', data),
     getByFarmer: (farmerId) => api.get(`/payments/farmer/${farmerId}`),
+    exportExcel: (params) => api.get('/payments/export', { params, responseType: 'blob' }),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

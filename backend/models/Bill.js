@@ -35,4 +35,8 @@ const billSchema = mongoose.Schema(
     }
 );
 
+billSchema.index({ createdAt: -1 });
+billSchema.index({ paymentType: 1 });
+billSchema.index({ farmerId: 1 });
+
 export default mongoose.model('Bill', billSchema);

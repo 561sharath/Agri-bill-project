@@ -18,12 +18,7 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const token = localStorage.getItem('agribill_token');
         if (token) {
-            if (token === 'demo_token_xyz123') {
-                const stored = localStorage.getItem('agribill_user');
-                setUser(stored ? JSON.parse(stored) : { name: 'Demo User', role: 'admin' });
-                setLoading(false);
-                return;
-            }
+
             authAPI.me()
                 .then(res => setUser(res.data.user))
                 .catch(() => {

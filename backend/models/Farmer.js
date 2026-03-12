@@ -26,4 +26,7 @@ const farmerSchema = mongoose.Schema(
     }
 );
 
+farmerSchema.index({ mobile: 1 });
+farmerSchema.index({ name: 'text' });
+
 export default mongoose.model('Farmer', farmerSchema);

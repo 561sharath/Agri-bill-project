@@ -1,93 +1,83 @@
 import { formatCurrency } from '../utils/formatCurrency';
 
-const StatCard = ({ icon, iconColor, label, value, trend, trendLabel, compact = false }) => {
-    const isPositive = trend > 0;
-    const isNeutral = trend === 0;
+const StatCard = ({ title, value, percentageChange, icon, colorClass, highlightClass }) => {
+    const isPositive = percentageChange > 0;
+    const isNegative = percentageChange < 0;
+    const isNeutral = percentageChange === 0;
 
     return (
-        <div className="card p-5 flex flex-col gap-1 animate-slide-up hover:shadow-md transition-shadow duration-200">
-            <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-sm font-medium">{label}</span>
-                <span
-                    className={`material-symbols-outlined ${iconColor}`}
-                    style={{ fontSize: '22px', fontVariationSettings: "'FILL' 1" }}
-                >
-                    {icon}
-                </span>
+        <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
+            {/* Background design */}
+            <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full ${highlightClass} opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500`} />
+
+            <div className="flex flex-col justify-between relative z-10 w-full">
+                <div className="flex justify-between items-start mb-4">
+                    <div className={`h-11 w-11 rounded-xl ${highlightClass} flex items-center justify-center`}>
+                        <span className={`material-symbols-outlined ${colorClass}`} style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>
+                            {icon}
+                        </span>
+                    </div>
+                </div>
+
+                <h3 className="text-slate-500 font-semibold mb-1 truncate">{title}</h3>
+
+                <div className="flex items-end justify-between w-full">
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                        {value}
+                    </p>
+
+                    {percentageChange !== undefined && (
+                        <div className={`flex items-center text-xs font-bold shrink-0 ml-2
+                            ${isPositive ? 'text-emerald-500' : isNegative ? 'text-red-500' : 'text-slate-400'}`}
+                        >
+                            {isPositive && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_up</span>}
+                            {isNegative && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_down</span>}
+                            {isNeutral && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_flat</span>}
+                            <span className="ml-[1px]">{Math.abs(percentageChange)}%</span>
+                        </div>
+                    )}
+                </div>
             </div>
-
-            <p className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                {compact ? formatCurrency(value, true) : (typeof value === 'number' ? formatCurrency(value) : value)}
-            </p>
-
-            {trendLabel && (
-                <p className={`text-xs font-semibold flex items-center gap-0.5 mt-1
-          ${isPositive ? (trend > 0 && label.includes('Credit') || label.includes('Pending') ? 'text-red-500' : 'text-emerald-600') : isNeutral ? 'text-slate-400' : 'text-emerald-600'}
-        `}>
-                    <span
-                        className="material-symbols-outlined"
-                        style={{ fontSize: '14px' }}
-                    >
-                        {isPositive ? 'trending_up' : isNeutral ? 'trending_flat' : 'trending_down'}
-                    </span>
-                    {trendLabel}
-                </p>
-            )}
         </div>
     );
 };
 
 const DashboardCards = ({ stats }) => {
-    const cards = [
-        {
-            icon: 'point_of_sale',
-            iconColor: 'text-primary',
-            label: "Today's Sales",
-            value: stats?.todaySales ?? 12450,
-            trend: 12,
-            trendLabel: '+12% from yesterday',
-        },
-        {
-            icon: 'account_balance_wallet',
-            iconColor: 'text-orange-500',
-            label: 'Total Credit Given',
-            value: stats?.totalCredit ?? 485200,
-            trend: 5.2,
-            trendLabel: '5.2% higher risk',
-        },
-        {
-            icon: 'hourglass_empty',
-            iconColor: 'text-red-500',
-            label: 'Total Pending Credit',
-            value: stats?.pendingCredit ?? 112000,
-            trend: -2,
-            trendLabel: '-2% from last month',
-        },
-        {
-            icon: 'person_add',
-            iconColor: 'text-blue-500',
-            label: 'Total Farmers',
-            value: stats?.totalFarmers ?? 842,
-            trend: 8,
-            trendLabel: '+8% new joins',
-            compact: false,
-        },
-    ];
-
     return (
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {cards.map((card, i) => (
-                <StatCard
-                    key={i}
-                    {...card}
-                    // The Farmers card shows raw count - override formatter
-                    value={card.label === 'Total Farmers' ? (stats?.totalFarmers ?? 842) : card.value}
-                />
-            ))}
-        </section>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+            <StatCard
+                title="Today's Sales"
+                value={formatCurrency(stats?.todaySales?.amount || 0)}
+                percentageChange={stats?.todaySales?.percentageChange}
+                icon="monitoring"
+                colorClass="text-primary"
+                highlightClass="bg-primary/10"
+            />
+            <StatCard
+                title="Total Credit Given"
+                value={formatCurrency(stats?.totalCreditGiven || 0)}
+                icon="account_balance_wallet"
+                colorClass="text-blue-500"
+                highlightClass="bg-blue-100 dark:bg-blue-900/30"
+            />
+            <StatCard
+                title="Farmers Count"
+                value={stats?.totalFarmers?.count || 0}
+                percentageChange={stats?.totalFarmers?.percentageChange}
+                icon="groups"
+                colorClass="text-emerald-500"
+                highlightClass="bg-emerald-100 dark:bg-emerald-900/30"
+            />
+            <StatCard
+                title="Pending Credit (This Mnt)"
+                value={formatCurrency(stats?.pendingCreditThisMonth?.amount || 0)}
+                percentageChange={stats?.pendingCreditThisMonth?.percentageChange}
+                icon="pending_actions"
+                colorClass="text-orange-500 dark:text-orange-400"
+                highlightClass="bg-orange-100 dark:bg-orange-900/30"
+            />
+        </div>
     );
 };
 
-// Special overridden export for non-currency value card
-export { StatCard };
 export default DashboardCards;

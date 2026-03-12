@@ -2,6 +2,7 @@ import express from 'express';
 import {
     createPayment,
     getPayments,
+    exportPaymentsExcel,
     getPaymentsByFarmer
 } from '../controllers/paymentController.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -12,6 +13,7 @@ router.route('/')
     .post(protect, createPayment)
     .get(protect, getPayments);
 
-router.route('/farmer/:farmerId').get(protect, getPaymentsByFarmer);
+router.get('/export', protect, exportPaymentsExcel);
+router.get('/farmer/:farmerId', protect, getPaymentsByFarmer);
 
 export default router;

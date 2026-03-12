@@ -8,7 +8,8 @@ const navItems = [
     { to: '/farmers', icon: 'groups', label: 'Farmers' },
     { to: '/inventory', icon: 'inventory_2', label: 'Inventory' },
     { to: '/credit-ledger', icon: 'menu_book', label: 'Credit Ledger' },
-    { to: '/payments', icon: 'payments', label: 'Payments' },
+    { to: '/payments', icon: 'history', label: 'Payment History' },
+    { to: '/credit-payment-history', icon: 'account_balance', label: 'Credit Payments' },
     { to: '/reports', icon: 'bar_chart', label: 'Reports' },
 ];
 
@@ -34,7 +35,10 @@ const Sidebar = ({ collapsed, onToggle }) => {
       `}
         >
             {/* Logo */}
-            <div className={`p-5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 ${collapsed ? 'justify-center' : ''}`}>
+            <div
+                onClick={() => navigate('/')}
+                className={`p-5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${collapsed ? 'justify-center' : ''}`}
+            >
                 <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-white text-xl" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>eco</span>
                 </div>

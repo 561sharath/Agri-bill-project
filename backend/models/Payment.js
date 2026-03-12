@@ -31,4 +31,7 @@ const paymentSchema = mongoose.Schema(
     }
 );
 
+paymentSchema.index({ date: -1 });
+paymentSchema.index({ farmerId: 1 });
+
 export default mongoose.model('Payment', paymentSchema);

@@ -5,7 +5,9 @@ import {
     createFarmer,
     updateFarmer,
     deleteFarmer,
-    getFarmerTransactions
+    getFarmerTransactions,
+    exportFarmerHistory,
+    searchFarmers
 } from '../controllers/farmerController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -15,11 +17,14 @@ router.route('/')
     .get(protect, getFarmers)
     .post(protect, createFarmer);
 
+router.get('/search', protect, searchFarmers);
+
 router.route('/:id')
     .get(protect, getFarmerById)
     .put(protect, updateFarmer)
     .delete(protect, deleteFarmer);
 
-router.route('/:id/transactions').get(protect, getFarmerTransactions);
+router.get('/:id/transactions', protect, getFarmerTransactions);
+router.get('/:id/export', protect, exportFarmerHistory);
 
 export default router;

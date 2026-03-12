@@ -23,4 +23,7 @@ const productSchema = mongoose.Schema(
     }
 );
 
+productSchema.index({ name: 1 });
+productSchema.index({ brand: 1 });
+
 export default mongoose.model('Product', productSchema);
