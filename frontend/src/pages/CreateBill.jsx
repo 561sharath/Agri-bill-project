@@ -8,11 +8,12 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { getShopDetails } from '../utils/shopStorage';
 import { BillPDFDocument } from '../components/BillPDFDocument';
 import SearchableSelect from '../components/SearchableSelect';
-
+import AddFarmerModal from '../components/AddFarmerModal';
 
 const CreateBill = () => {
     const navigate = useNavigate();
     const [products, setProducts] = useState([]);
+    const [showAddFarmerModal, setShowAddFarmerModal] = useState(false);
     const [farmerSearch, setFarmerSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [selectedFarmer, setSelectedFarmer] = useState(null);
@@ -301,9 +302,19 @@ const CreateBill = () => {
                     <div className="lg:col-span-2 flex flex-col gap-5">
                         {/* Farmer selection */}
                         <div className="card p-5">
-                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
-                                <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
-                                Select Farmer
+                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center justify-between">
+                                <span className="flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
+                                    Select Farmer
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddFarmerModal(true)}
+                                    className="btn-primary py-1.5 px-3 text-xs flex items-center gap-1 cursor-pointer"
+                                >
+                                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>person_add</span>
+                                    Add Farmer
+                                </button>
                             </h3>
                             <div className="relative mb-3">
                                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" style={{ fontSize: '16px' }}>search</span>
@@ -682,6 +693,19 @@ const CreateBill = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {showAddFarmerModal && (
+                <AddFarmerModal
+                    onClose={() => setShowAddFarmerModal(false)}
+                    onSave={(newFarmer) => {
+                        setShowAddFarmerModal(false);
+                        setSelectedFarmer(newFarmer);
+                        setFarmerSearch('');
+                        setIsNewFarmer(false);
+                        setSearchResults([]);
+                    }}
+                />
             )}
         </div>
     );
