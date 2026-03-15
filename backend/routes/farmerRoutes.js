@@ -1,6 +1,7 @@
 import express from 'express';
 import {
     getFarmers,
+    getFarmerStats,
     getFarmerById,
     createFarmer,
     updateFarmer,
@@ -17,6 +18,7 @@ router.route('/')
     .get(protect, getFarmers)
     .post(protect, createFarmer);
 
+router.get('/stats', protect, getFarmerStats);
 router.get('/search', protect, searchFarmers);
 
 router.route('/:id')

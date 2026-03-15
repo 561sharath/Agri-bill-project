@@ -335,7 +335,7 @@ const FarmerDeleteModal = ({ farmer, onClose, onDeleted }) => {
 };
 
 // ─── Main Farmer Table ────────────────────────────────────────────────────────
-const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onRefresh, compact = false }) => {
+const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onFilterChange, currentFilter = '', onRefresh, compact = false }) => {
     const [search, setSearch] = useState('');
     const [viewFarmer, setViewFarmer] = useState(null);
     const [editFarmer, setEditFarmer] = useState(null);
@@ -358,7 +358,7 @@ const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onRefr
         }
     }, [loading]);
 
-    if (loading && !search) {
+    if (loading && !search && !currentFilter) {
         return (
             <div className="card p-6 space-y-4">
                 {[...Array(5)].map((_, i) => (
@@ -378,8 +378,8 @@ const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onRefr
         <>
             <div className="card overflow-hidden shadow-sm">
                 {!compact && (
-                    <div className="p-4 border-b border-slate-100 dark:border-slate-800">
-                        <div className="relative max-w-sm">
+                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                        <div className="relative w-full sm:max-w-sm">
                             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" style={{ fontSize: '18px' }}>search</span>
                             {loading && search && (
                                 <span className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -392,9 +392,32 @@ const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onRefr
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 placeholder="Find farmer by name or mobile..."
-                                className="input pl-10"
+                                className="input pl-10 w-full"
                             />
                         </div>
+                        
+                        {onFilterChange && (
+                            <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+                                <button
+                                    onClick={() => onFilterChange('')}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${currentFilter === '' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} cursor-pointer`}
+                                >
+                                    All Farmers
+                                </button>
+                                <button
+                                    onClick={() => onFilterChange('credit')}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${currentFilter === 'credit' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'} cursor-pointer`}
+                                >
+                                    Credit Farmers
+                                </button>
+                                <button
+                                    onClick={() => onFilterChange('clear')}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${currentFilter === 'clear' ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'} cursor-pointer`}
+                                >
+                                    Clear Farmers
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 

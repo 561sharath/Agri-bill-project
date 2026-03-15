@@ -4,11 +4,13 @@ import toast from 'react-hot-toast';
 import { reportsAPI, remindersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
+import useDebounce from '../hooks/useDebounce';
 
 const CreditLedger = () => {
     const navigate = useNavigate();
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebounce(search, 500);
     const [sendingReminderFor, setSendingReminderFor] = useState(null);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -20,7 +22,7 @@ const CreditLedger = () => {
         setLoading(true);
         try {
             const params = { page, limit: 10 };
-            if (search.trim()) params.search = search.trim();
+            if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
             const res = await reportsAPI.getCreditReport(params);
             setData(res.data.data);
             setTotalPages(res.data.totalPages);
@@ -38,7 +40,7 @@ const CreditLedger = () => {
 
     useEffect(() => {
         fetchCreditReport();
-    }, [page, search]);
+    }, [page, debouncedSearch]);
 
     const getStatusBadge = (balance) => {
         if (balance > 10000) return <span className="badge badge-danger">High Alert</span>;

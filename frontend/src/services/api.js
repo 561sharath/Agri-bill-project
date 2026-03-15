@@ -40,12 +40,18 @@ export const authAPI = {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export const dashboardAPI = {
-    getSummary: () => api.get('/dashboard/summary'),
+    getSummary: () => api.get('/dashboard/summary'), // Legacy, optional
+    getSales: () => api.get('/dashboard/sales'),
+    getInventory: () => api.get('/dashboard/inventory'),
+    getFarmers: () => api.get('/dashboard/farmers'),
+    getCredit: () => api.get('/dashboard/credit'),
+    getCharts: () => api.get('/dashboard/charts'),
 };
 
 // ─── Farmers ─────────────────────────────────────────────────────────────────
 export const farmersAPI = {
     getAll: (params) => api.get('/farmers', { params }),
+    getStats: () => api.get('/farmers/stats'),
     getById: (id) => api.get(`/farmers/${id}`),
     search: (q) => api.get('/farmers/search', { params: { q } }),
     create: (data) => api.post('/farmers', data),
@@ -58,9 +64,11 @@ export const farmersAPI = {
 // ─── Products ────────────────────────────────────────────────────────────────
 export const productsAPI = {
     getAll: (params) => api.get('/products', { params }),
+    getStats: () => api.get('/products/stats'),
     getById: (id) => api.get(`/products/${id}`),
     create: (data) => api.post('/products', data),
     update: (id, data) => api.put(`/products/${id}`, data),
+    updateStock: (id, updateStock) => api.patch(`/products/${id}/stock`, { updateStock }),
     delete: (id) => api.delete(`/products/${id}`),
     getLowStock: () => api.get('/products/low-stock'),
 };

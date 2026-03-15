@@ -3,8 +3,8 @@ import Bill from '../models/Bill.js';
 import Payment from '../models/Payment.js';
 import ExcelJS from 'exceljs';
 
-// @desc    Get all farmers with pagination + search
-// @route   GET /api/farmers?page=&limit=&search=
+// @desc    Get all farmers with pagination + search + creditFilter
+// @route   GET /api/farmers?page=&limit=&search=&creditFilter=credit|clear
 // @access  Private
 export const getFarmers = async (req, res, next) => {
     try {
@@ -12,15 +12,22 @@ export const getFarmers = async (req, res, next) => {
         const limit = parseInt(req.query.limit, 10) || 10;
         const startIndex = (page - 1) * limit;
         const search = req.query.search?.trim();
+        const creditFilter = req.query.creditFilter; // 'credit' | 'clear' | undefined
 
-        const query = search
-            ? {
-                $or: [
-                    { name: { $regex: search, $options: 'i' } },
-                    { mobile: { $regex: search, $options: 'i' } }
-                ]
-            }
-            : {};
+        const query = {};
+
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { mobile: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        if (creditFilter === 'credit') {
+            query.creditBalance = { $gt: 0 };
+        } else if (creditFilter === 'clear') {
+            query.creditBalance = { $lte: 0 };
+        }
 
         const totalRecords = await Farmer.countDocuments(query);
         const farmers = await Farmer.find(query)
@@ -34,6 +41,27 @@ export const getFarmers = async (req, res, next) => {
             totalPages: Math.ceil(totalRecords / limit),
             totalRecords
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Get global farmer stats (total, pending credit, clear) — across all records
+// @route   GET /api/farmers/stats
+// @access  Private
+export const getFarmerStats = async (req, res, next) => {
+    try {
+        const [agg] = await Farmer.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    pending: { $sum: { $cond: [{ $gt: ['$creditBalance', 0] }, 1, 0] } },
+                    clear: { $sum: { $cond: [{ $lte: ['$creditBalance', 0] }, 1, 0] } },
+                }
+            }
+        ]);
+        res.json(agg || { total: 0, pending: 0, clear: 0 });
     } catch (error) {
         next(error);
     }

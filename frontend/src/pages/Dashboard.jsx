@@ -1,44 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import DashboardCards from '../components/DashboardCards';
 import { MonthlyRevenueChart, WeeklyRevenueChart } from '../components/Charts';
 import { formatCurrency } from '../utils/formatCurrency';
 import { dashboardAPI } from '../services/api';
 
 // ─── Individual metric fetcher with isolated error state ─────────────────────
-const useDashboardSection = (key) => {
+const useDashboardSection = (apiFn) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
-    useEffect(() => {
-        const fetch = async () => {
-            try {
-                const res = await dashboardAPI.getSummary();
-                setData(res.data[key]);
-            } catch {
-                setError(true);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetch();
-    }, [key]);
-
-    return { data, loading, error };
-};
-
-// ─── Full dashboard data (one call, split rendering) ─────────────────────────
-const useDashboardAll = () => {
-    const [data, setData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(false);
-
-    const refetch = async () => {
+    const fetch = async () => {
         setLoading(true);
         setError(false);
         try {
-            const res = await dashboardAPI.getSummary();
+            const res = await apiFn();
             setData(res.data);
         } catch {
             setError(true);
@@ -47,8 +23,11 @@ const useDashboardAll = () => {
         }
     };
 
-    useEffect(() => { refetch(); }, []);
-    return { data, loading, error, refetch };
+    useEffect(() => {
+        fetch();
+    }, []);
+
+    return { data, loading, error, refetch: fetch };
 };
 
 // ─── Metric Card with individual error boundary ───────────────────────────────
@@ -66,20 +45,21 @@ const Skeleton = ({ className = '' }) => (
 
 const Dashboard = () => {
     const navigate = useNavigate();
-    const { data, loading, error, refetch } = useDashboardAll();
 
-    const defaults = {
-        todaySales: { amount: 0, percentageChange: 0 },
-        totalCreditGiven: 0,
-        pendingCreditThisMonth: { amount: 0, percentageChange: 0 },
-        totalFarmers: { count: 0, percentageChange: 0 },
-        monthlyRevenue: [],
-        weeklyRevenue: [],
-        pendingLedger: [],
-        lowStockProducts: []
+    // Independent Data Fetching
+    const { data: sales, loading: loadingSales, error: errorSales } = useDashboardSection(dashboardAPI.getSales);
+    const { data: farmers, loading: loadingFarmers, error: errorFarmers } = useDashboardSection(dashboardAPI.getFarmers);
+    const { data: credit, loading: loadingCredit, error: errorCredit } = useDashboardSection(dashboardAPI.getCredit);
+    const { data: inventory, loading: loadingInventory, error: errorInventory } = useDashboardSection(dashboardAPI.getInventory);
+    const { data: charts, loading: loadingCharts, error: errorCharts } = useDashboardSection(dashboardAPI.getCharts);
+
+    // Provide combined stats for DashboardCards
+    const combinedStats = {
+        todaySales: sales?.todaySales,
+        totalCreditGiven: sales?.totalCreditGiven,
+        totalFarmers: farmers?.totalFarmers,
+        pendingCreditThisMonth: credit?.pendingCreditThisMonth,
     };
-
-    const d = data || defaults;
 
     return (
         <div className="p-6 flex flex-col gap-6 animate-fade-in">
@@ -89,28 +69,111 @@ const Dashboard = () => {
                     <h1 className="page-title">Dashboard</h1>
                     <p className="page-subtitle">Welcome back! Here's what's happening today.</p>
                 </div>
-                {error && (
-                    <button onClick={refetch} className="btn-outline text-sm text-red-500 border-red-200">
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
-                        Retry
-                    </button>
-                )}
             </div>
 
-            {/* KPI Cards — even if loading show skeleton */}
-            {loading ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
-                </div>
-            ) : error ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {['Today Sales', 'Total Credit', 'Farmers', 'Pending Credit'].map(label => (
-                        <MetricFallback key={label} label={label} />
-                    ))}
-                </div>
-            ) : (
-                <DashboardCards stats={d} />
-            )}
+            {/* Independent KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+                {/* 1. Today Sales */}
+                {loadingSales ? <Skeleton className="h-28" /> : errorSales ? <MetricFallback label="Today's Sales" /> : (
+                    <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-primary/10 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="flex flex-col justify-between relative z-10 w-full">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-primary" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>monitoring</span>
+                                </div>
+                            </div>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Today's Sales</h3>
+                            <div className="flex items-end justify-between w-full">
+                                <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                                    {formatCurrency(sales?.todaySales?.amount || 0)}
+                                </p>
+                                {sales?.todaySales?.percentageChange !== undefined && (
+                                    <div className={`flex items-center text-xs font-bold shrink-0 ml-2 ${sales.todaySales.percentageChange > 0 ? 'text-emerald-500' : sales.todaySales.percentageChange < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                        {sales.todaySales.percentageChange > 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_up</span>}
+                                        {sales.todaySales.percentageChange < 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_down</span>}
+                                        <span className="ml-[1px]">{Math.abs(sales.todaySales.percentageChange)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                
+                {/* 2. Total Credit Given */}
+                {loadingSales ? <Skeleton className="h-28" /> : errorSales ? <MetricFallback label="Total Credit" /> : (
+                    <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-blue-100 dark:bg-blue-900/30 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="flex flex-col justify-between relative z-10 w-full">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="h-11 w-11 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-blue-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>account_balance_wallet</span>
+                                </div>
+                            </div>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Total Credit Given</h3>
+                            <div className="flex items-end justify-between w-full">
+                                <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                                    {formatCurrency(sales?.totalCreditGiven || 0)}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3. Farmers Count */}
+                {loadingFarmers ? <Skeleton className="h-28" /> : errorFarmers ? <MetricFallback label="Farmers Count" /> : (
+                    <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-emerald-100 dark:bg-emerald-900/30 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="flex flex-col justify-between relative z-10 w-full">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="h-11 w-11 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-emerald-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>groups</span>
+                                </div>
+                            </div>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Farmers Count</h3>
+                            <div className="flex items-end justify-between w-full">
+                                <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                                    {farmers?.totalFarmers?.count || 0}
+                                </p>
+                                {farmers?.totalFarmers?.percentageChange !== undefined && (
+                                    <div className={`flex items-center text-xs font-bold shrink-0 ml-2 ${farmers.totalFarmers.percentageChange > 0 ? 'text-emerald-500' : farmers.totalFarmers.percentageChange < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                        {farmers.totalFarmers.percentageChange > 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_up</span>}
+                                        {farmers.totalFarmers.percentageChange < 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_down</span>}
+                                        <span className="ml-[1px]">{Math.abs(farmers.totalFarmers.percentageChange)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 4. Pending Credit */}
+                {loadingCredit ? <Skeleton className="h-28" /> : errorCredit ? <MetricFallback label="Pending Credit" /> : (
+                    <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-orange-100 dark:bg-orange-900/30 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="flex flex-col justify-between relative z-10 w-full">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="h-11 w-11 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-orange-500 dark:text-orange-400" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>pending_actions</span>
+                                </div>
+                            </div>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Pending Credit (This Mnt)</h3>
+                            <div className="flex items-end justify-between w-full">
+                                <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                                    {formatCurrency(credit?.pendingCreditThisMonth?.amount || 0)}
+                                </p>
+                                {credit?.pendingCreditThisMonth?.percentageChange !== undefined && (
+                                    <div className={`flex items-center text-xs font-bold shrink-0 ml-2 ${credit.pendingCreditThisMonth.percentageChange > 0 ? 'text-emerald-500' : credit.pendingCreditThisMonth.percentageChange < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                        {credit.pendingCreditThisMonth.percentageChange > 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_up</span>}
+                                        {credit.pendingCreditThisMonth.percentageChange < 0 && <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>trending_down</span>}
+                                        <span className="ml-[1px]">{Math.abs(credit.pendingCreditThisMonth.percentageChange)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* Main Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -118,13 +181,16 @@ const Dashboard = () => {
                 <div className="lg:col-span-2 flex flex-col gap-6">
                     {/* Charts */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {loading
-                            ? [0, 1].map(i => <Skeleton key={i} className="h-48" />)
-                            : <>
-                                <MonthlyRevenueChart data={d.monthlyRevenue} />
-                                <WeeklyRevenueChart data={d.weeklyRevenue} />
+                        {loadingCharts ? [0, 1].map(i => <Skeleton key={i} className="h-48" />) : errorCharts ? (
+                            <div className="col-span-1 md:col-span-2">
+                                <MetricFallback label="Revenue Charts" />
+                            </div>
+                        ) : (
+                            <>
+                                <MonthlyRevenueChart data={charts.monthlyRevenue} />
+                                <WeeklyRevenueChart data={charts.weeklyRevenue} />
                             </>
-                        }
+                        )}
                     </div>
 
                     {/* Pending Credit Ledger */}
@@ -149,12 +215,14 @@ const Dashboard = () => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {loading ? (
+                                    {loadingCredit ? (
                                         [...Array(3)].map((_, i) => (
                                             <tr key={i}><td colSpan={4} className="px-5 py-3"><Skeleton className="h-4" /></td></tr>
                                         ))
-                                    ) : d.pendingLedger?.length > 0 ? (
-                                        d.pendingLedger.map((item, idx) => (
+                                    ) : errorCredit ? (
+                                        <tr><td colSpan={4} className="px-5 py-6"><MetricFallback label="Pending Ledger" /></td></tr>
+                                    ) : credit?.pendingLedger?.length > 0 ? (
+                                        credit.pendingLedger.map((item, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                                                 <td className="px-5 py-3.5 font-medium text-sm">{item.farmerName}</td>
                                                 <td className="px-5 py-3.5 font-bold text-red-500 text-sm">{formatCurrency(item.amount)}</td>
@@ -221,10 +289,12 @@ const Dashboard = () => {
                     <div className="card p-5">
                         <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4">Stock Alerts</h3>
                         <div className="flex flex-col gap-3">
-                            {loading ? (
+                            {loadingInventory ? (
                                 [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12" />)
-                            ) : d.lowStockProducts?.length > 0 ? (
-                                d.lowStockProducts.map((item, i) => {
+                            ) : errorInventory ? (
+                                <MetricFallback label="Stock Alerts" />
+                            ) : inventory?.lowStockProducts?.length > 0 ? (
+                                inventory.lowStockProducts.map((item, i) => {
                                     const isCritical = item.stock <= 5;
                                     return (
                                         <div key={i} className="flex items-center gap-3">

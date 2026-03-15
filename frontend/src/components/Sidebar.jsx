@@ -37,19 +37,23 @@ const Sidebar = ({ collapsed, onToggle }) => {
       `}
         >
             {/* Logo */}
-            <div
-                onClick={() => navigate('/')}
-                className={`p-5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${collapsed ? 'justify-center' : ''}`}
-            >
-                <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-white text-xl" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>eco</span>
-                </div>
-                {!collapsed && (
-                    <div className="overflow-hidden">
-                        <h1 className="text-base font-bold text-primary tracking-tight leading-none">AgriBill</h1>
-                        <p className="text-[10px] text-slate-400 font-medium mt-0.5">Agri-Business Mgmt</p>
+            <div className={`p-5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 transition-colors ${collapsed ? 'justify-center' : ''}`}>
+                
+                {/* Clickable Logo and Name */}
+                <div 
+                    onClick={() => navigate('/')} 
+                    className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+                >
+                    <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-white text-xl" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>eco</span>
                     </div>
-                )}
+                    {!collapsed && (
+                        <div className="overflow-hidden">
+                            <h1 className="text-base font-bold text-primary tracking-tight leading-none">AgriBill</h1>
+                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">Agri-Business Mgmt</p>
+                        </div>
+                    )}
+                </div>
 
                 {/* Collapse toggle */}
                 <button
