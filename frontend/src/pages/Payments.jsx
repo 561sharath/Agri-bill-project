@@ -90,13 +90,14 @@ const FarmerSearchSelect = ({ onSelect, selectedFarmer, onClear }) => {
 // ─── Record Payment Modal ──────────────────────────────────────────────────────
 const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
     const [selectedFarmer, setSelectedFarmer] = useState(initialFarmer);
+    const [sendWhatsApp, setSendWhatsApp] = useState(true);
     const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm();
 
     const onSubmit = async (data) => {
         if (!selectedFarmer) { toast.error('Please select a farmer'); return; }
         try {
-            await paymentsAPI.create({ ...data, farmerId: selectedFarmer._id });
-            toast.success('Payment recorded successfully!');
+            const res = await paymentsAPI.create({ ...data, farmerId: selectedFarmer._id, sendWhatsApp });
+            toast.success(res?.data?.whatsAppSent ? 'Payment recorded and WhatsApp sent!' : 'Payment recorded successfully!');
             onSave();
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to record payment');
@@ -165,6 +166,16 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
                         <input {...register('notes')} className="input" placeholder="Optional note..." />
                     </div>
 
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={sendWhatsApp}
+                            onChange={(e) => setSendWhatsApp(e.target.checked)}
+                            className="rounded border-slate-300 text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm">Send WhatsApp confirmation to farmer (and credit cleared if balance becomes 0)</span>
+                    </label>
+
                     <div className="flex gap-3 pt-2">
                         <button type="button" onClick={onClose} className="btn-outline flex-1">Cancel</button>
                         <button type="submit" disabled={isSubmitting} className="btn-primary flex-1">
@@ -193,6 +204,7 @@ const Payments = () => {
     // Default: today's date
     const [filters, setFilters] = useState({ startDate: todayStr(), endDate: todayStr() });
     const [exporting, setExporting] = useState(false);
+    const [sendingWaFor, setSendingWaFor] = useState(null);
 
     const fetchPayments = async (p = page, f = filters) => {
         setLoading(true);
@@ -243,6 +255,22 @@ const Payments = () => {
             toast.error('Export failed');
         } finally {
             setExporting(false);
+        }
+    };
+
+    const handleSendPaymentWhatsApp = async (payment) => {
+        if (!payment.farmerId?.mobile) {
+            toast.error('No mobile number for this farmer');
+            return;
+        }
+        setSendingWaFor(payment._id);
+        try {
+            await paymentsAPI.sendPaymentWhatsApp(payment._id);
+            toast.success(`Confirmation sent to ${payment.farmerId?.name || 'farmer'}`);
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to send WhatsApp');
+        } finally {
+            setSendingWaFor(null);
         }
     };
 
@@ -329,18 +357,19 @@ const Payments = () => {
                                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Method</th>
                                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Notes</th>
                                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Ref ID</th>
+                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase text-center">WhatsApp</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                             {loading ? (
                                 [...Array(5)].map((_, i) => (
                                     <tr key={i} className="animate-pulse">
-                                        <td colSpan={7} className="px-5 py-4"><div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" /></td>
+                                        <td colSpan={8} className="px-5 py-4"><div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" /></td>
                                     </tr>
                                 ))
                             ) : payments.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-5 py-12 text-center text-slate-400">
+                                    <td colSpan={8} className="px-5 py-12 text-center text-slate-400">
                                         {isCustomFilter ? 'No payments found for the selected date range' : 'No payment records found'}
                                     </td>
                                 </tr>
@@ -357,6 +386,23 @@ const Payments = () => {
                                         <td className="px-5 py-4">{methodBadge(payment.method)}</td>
                                         <td className="px-5 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">{payment.notes || '-'}</td>
                                         <td className="px-5 py-4 text-xs text-slate-400 font-mono">{payment._id?.toString().slice(-8)}</td>
+                                        <td className="px-5 py-4 text-center">
+                                            {payment.farmerId?.mobile ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSendPaymentWhatsApp(payment)}
+                                                    disabled={sendingWaFor === payment._id}
+                                                    className="p-2 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50"
+                                                    title="Send payment confirmation via WhatsApp"
+                                                >
+                                                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+                                                        {sendingWaFor === payment._id ? 'hourglass_empty' : 'chat'}
+                                                    </span>
+                                                </button>
+                                            ) : (
+                                                <span className="text-slate-300" title="No mobile">—</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))
                             )}

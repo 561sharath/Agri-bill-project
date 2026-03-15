@@ -166,3 +166,53 @@ export const generateCreditReminderPDF = async (farmer, amount) => {
         doc.end();
     });
 };
+
+/**
+ * Generate a simple one-page PDF (credit reminder or payment receipt).
+ * @param {string} title    - Heading on the PDF
+ * @param {Array}  lines    - Array of { label, value } rows
+ * @returns {Promise<Buffer>}
+ */
+export const generateSimplePDF = (title, lines = []) => {
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        const chunks = [];
+        doc.on('data', c => chunks.push(c));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
+
+        const primary = '#2f7f33';
+        const shopName = process.env.SHOP_NAME || 'AgriBill';
+
+        doc.fontSize(20).fillColor(primary).text(shopName, { align: 'center' });
+        doc.moveDown(0.5);
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#ddd').stroke();
+        doc.moveDown(1);
+
+        doc.fontSize(15).fillColor('#333').text(title, { align: 'center' });
+        doc.moveDown(1.5);
+
+        lines.forEach(({ label, value }) => {
+            doc.fontSize(11).fillColor('#555').text(`${label}:`, 50, doc.y, { continued: true, width: 200 });
+            doc.fillColor('#111').text(`  ${value}`, { align: 'left' });
+            doc.moveDown(0.4);
+        });
+
+        doc.moveDown(2);
+        doc.fontSize(10).fillColor('#888')
+            .text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, { align: 'center' });
+        doc.text('Thank you for your business.', { align: 'center' });
+
+        doc.end();
+    });
+};
+
+/** Payment receipt PDF. */
+export const generatePaymentReceiptPDF = (farmer, paidAmount, remaining) =>
+    generateSimplePDF('Payment Receipt', [
+        { label: 'Farmer Name', value: farmer.name || '' },
+        { label: 'Village', value: farmer.village || '-' },
+        { label: 'Amount Paid', value: `Rs. ${Number(paidAmount).toLocaleString('en-IN')}` },
+        { label: 'Remaining Balance', value: `Rs. ${Number(remaining).toLocaleString('en-IN')}` },
+        { label: 'Date', value: new Date().toLocaleDateString('en-IN') },
+    ]);
