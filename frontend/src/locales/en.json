@@ -1,0 +1,59 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "createBill": "Create Bill",
+    "farmers": "Farmers",
+    "inventory": "Inventory",
+    "creditLedger": "Credit Ledger",
+    "payments": "Record Payment",
+    "creditPayments": "Credit & Payments",
+    "reports": "Reports",
+    "settings": "Settings"
+  },
+  "createBill": {
+    "title": "Create Bill",
+    "subtitle": "POS-style billing for fertilizer sales",
+    "selectFarmer": "Select Farmer",
+    "searchProduct": "Type to search product...",
+    "paymentType": "Payment Type",
+    "cash": "Cash",
+    "credit": "Credit",
+    "upi": "UPI",
+    "sendToWhatsApp": "Send bill to WhatsApp",
+    "generateBill": "Generate Bill",
+    "viewPdf": "View PDF",
+    "downloadPdf": "Download PDF"
+  },
+  "credit": {
+    "credit": "Credit",
+    "payment": "Payment",
+    "debit": "Debit",
+    "balance": "Balance",
+    "farmerName": "Farmer Name",
+    "totalAmount": "Total Amount",
+    "pendingAmount": "Pending Amount"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "search": "Search",
+    "date": "Date",
+    "amount": "Amount",
+    "description": "Description",
+    "todaySales": "Today Sales",
+    "totalCreditGiven": "Total Credit Given",
+    "farmersCount": "Farmers Count",
+    "pendingCredit": "Pending Credit"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your shop details and preferences",
+    "shopDetails": "Shop Details",
+    "shopName": "Shop Name",
+    "contactMobile": "Contact Mobile",
+    "shopAddress": "Shop Address (For Bills)",
+    "language": "Language",
+    "english": "English",
+    "kannada": "Kannada"
+  }
+}

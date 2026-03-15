@@ -17,6 +17,9 @@ logs/
 dist/
 coverage/
 
+# Generated PDFs (WhatsApp / ngrok)
+backend/bills/
+
 # OS/IDE settings
 .DS_Store
 .vscode/

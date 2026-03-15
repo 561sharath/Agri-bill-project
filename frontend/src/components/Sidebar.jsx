@@ -1,23 +1,25 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { getInitials, avatarColor } from '../utils/formatCurrency';
 
 const navItems = [
-    { to: '/', icon: 'dashboard', label: 'Dashboard', end: true },
-    { to: '/bills/create', icon: 'receipt_long', label: 'Create Bill' },
-    { to: '/farmers', icon: 'groups', label: 'Farmers' },
-    { to: '/inventory', icon: 'inventory_2', label: 'Inventory' },
-    { to: '/credit-ledger', icon: 'menu_book', label: 'Credit Ledger' },
-    { to: '/payments', icon: 'history', label: 'Payment History' },
-    { to: '/credit-payment-history', icon: 'account_balance', label: 'Credit Payments' },
-    { to: '/reports', icon: 'bar_chart', label: 'Reports' },
+    { to: '/', icon: 'dashboard', labelKey: 'nav.dashboard', end: true },
+    { to: '/bills/create', icon: 'receipt_long', labelKey: 'nav.createBill' },
+    { to: '/farmers', icon: 'groups', labelKey: 'nav.farmers' },
+    { to: '/inventory', icon: 'inventory_2', labelKey: 'nav.inventory' },
+    { to: '/credit-ledger', icon: 'menu_book', labelKey: 'nav.creditLedger' },
+    { to: '/payments', icon: 'payments', labelKey: 'nav.payments' },
+    { to: '/credit-payment-history', icon: 'account_balance', labelKey: 'nav.creditPayments' },
+    { to: '/reports', icon: 'bar_chart', labelKey: 'nav.reports' },
 ];
 
 const secondaryItems = [
-    { to: '/settings', icon: 'settings', label: 'Settings' },
+    { to: '/settings', icon: 'settings', labelKey: 'nav.settings' },
 ];
 
 const Sidebar = ({ collapsed, onToggle }) => {
+    const { t } = useTranslation();
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
@@ -77,7 +79,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
                         key={item.to}
                         to={item.to}
                         end={item.end}
-                        title={collapsed ? item.label : undefined}
+                        title={collapsed ? t(item.labelKey) : undefined}
                         className={({ isActive }) =>
                             `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 cursor-pointer group
               ${collapsed ? 'justify-center' : ''}
@@ -99,7 +101,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
                                     {item.icon}
                                 </span>
                                 {!collapsed && (
-                                    <span className="text-sm font-medium truncate">{item.label}</span>
+                                    <span className="text-sm font-medium truncate">{t(item.labelKey)}</span>
                                 )}
                             </>
                         )}
@@ -111,7 +113,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
                         <NavLink
                             key={item.to}
                             to={item.to}
-                            title={collapsed ? item.label : undefined}
+                            title={collapsed ? t(item.labelKey) : undefined}
                             className={({ isActive }) =>
                                 `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 cursor-pointer
                 ${collapsed ? 'justify-center' : ''}
@@ -132,7 +134,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
                                     >
                                         {item.icon}
                                     </span>
-                                    {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
+                                    {!collapsed && <span className="text-sm font-medium">{t(item.labelKey)}</span>}
                                 </>
                             )}
                         </NavLink>

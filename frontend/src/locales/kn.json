@@ -1,0 +1,59 @@
+{
+  "nav": {
+    "dashboard": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
+    "createBill": "ಬಿಲ್ ರಚಿಸಿ",
+    "farmers": "ರೈತರು",
+    "inventory": "ಇನ್ವೆಂಟರಿ",
+    "creditLedger": "ಕ್ರೆಡಿಟ್ ಲೆಡ್ಜರ್",
+    "payments": "ಪಾವತಿ ದಾಖಲಿಸಿ",
+    "creditPayments": "ಕ್ರೆಡಿಟ್ ಮತ್ತು ಪಾವತಿಗಳು",
+    "reports": "ವರದಿಗಳು",
+    "settings": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು"
+  },
+  "createBill": {
+    "title": "ಬಿಲ್ ರಚಿಸಿ",
+    "subtitle": "ಎರಕ ವ್ಯಾಪಾರಕ್ಕಾಗಿ ಬಿಲಿಂಗ್",
+    "selectFarmer": "ರೈತನನ್ನು ಆಯ್ಕೆಮಾಡಿ",
+    "searchProduct": "ಉತ್ಪನ್ನ ಹುಡುಕಲು ಟೈಪ್ ಮಾಡಿ...",
+    "paymentType": "ಪಾವತಿ ಪ್ರಕಾರ",
+    "cash": "ನಗದು",
+    "credit": "ಕ್ರೆಡಿಟ್",
+    "upi": "ಯುಪಿಐ",
+    "sendToWhatsApp": "ವಾಟ್ಸಾಪ್‌ಗೆ ಬಿಲ್ ಅನ್ನು ಕಳುಹಿಸಿ",
+    "generateBill": "ಬಿಲ್ ರಚಿಸಿ",
+    "viewPdf": "PDF ನೋಡಿ",
+    "downloadPdf": "PDF ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ"
+  },
+  "credit": {
+    "credit": "ಕ್ರೆಡಿಟ್",
+    "payment": "ಪಾವತಿ",
+    "debit": "ಡೆಬಿಟ್",
+    "balance": "ಬಾಕಿ",
+    "farmerName": "ರೈತನ ಹೆಸರು",
+    "totalAmount": "ಒಟ್ಟು ಮೊತ್ತ",
+    "pendingAmount": "ಬಾಕಿ ಮೊತ್ತ"
+  },
+  "common": {
+    "save": "ಉಳಿಸಿ",
+    "cancel": "ರದ್ದುಮಾಡಿ",
+    "search": "ಹುಡುಕಿ",
+    "date": "ದಿನಾಂಕ",
+    "amount": "ಮೊತ್ತ",
+    "description": "ವಿವರಣೆ",
+    "todaySales": "ಇಂದಿನ ಮಾರಾಟ",
+    "totalCreditGiven": "ಒಟ್ಟು ಕ್ರೆಡಿಟ್ ನೀಡಿದ್ದು",
+    "farmersCount": "ರೈತರ ಸಂಖ್ಯೆ",
+    "pendingCredit": "ಬಾಕಿ ಕ್ರೆಡಿಟ್"
+  },
+  "settings": {
+    "title": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
+    "subtitle": "ನಿಮ್ಮ ಅಂಗಡಿ ವಿವರಗಳು ಮತ್ತು ಆದ್ಯತೆಗಳನ್ನು ನಿರ್ವಹಿಸಿ",
+    "shopDetails": "ಅಂಗಡಿ ವಿವರಗಳು",
+    "shopName": "ಅಂಗಡಿಯ ಹೆಸರು",
+    "contactMobile": "ಸಂಪರ್ಕ ಮೊಬೈಲ್",
+    "shopAddress": "ಅಂಗಡಿ ವಿಳಾಸ (ಬಿಲ್‌ಗಳಿಗೆ)",
+    "language": "ಭಾಷೆ",
+    "english": "ಇಂಗ್ಲಿಷ್",
+    "kannada": "ಕನ್ನಡ"
+  }
+}
