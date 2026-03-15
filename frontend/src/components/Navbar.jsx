@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { getShopDetails } from '../utils/shopStorage';
 
 const Navbar = ({ title, onMobileMenuToggle }) => {
     const { user, logout } = useAuth();
@@ -40,7 +41,7 @@ const Navbar = ({ title, onMobileMenuToggle }) => {
             {/* Page title / Shop name */}
             <div className="flex-1 flex items-center gap-4">
                 <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 hidden sm:block">
-                    {title || 'Green Harvest Fertilisers'}
+                    {title || getShopDetails().shopName || 'AgriBill'}
                 </h2>
 
                 {/* Search */}

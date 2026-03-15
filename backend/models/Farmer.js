@@ -9,7 +9,6 @@ const farmerSchema = mongoose.Schema(
         mobile: {
             type: String,
             required: [true, 'Please add a mobile number'],
-            unique: true,
         },
         village: {
             type: String,
@@ -26,7 +25,7 @@ const farmerSchema = mongoose.Schema(
     }
 );
 
-farmerSchema.index({ mobile: 1 });
+farmerSchema.index({ mobile: 1 }, { unique: true });
 farmerSchema.index({ name: 'text' });
 
 export default mongoose.model('Farmer', farmerSchema);

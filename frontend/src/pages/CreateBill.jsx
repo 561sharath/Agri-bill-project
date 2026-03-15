@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
+import { pdf } from '@react-pdf/renderer';
 import toast from 'react-hot-toast';
 import { farmersAPI, productsAPI, billsAPI } from '../services/api';
 import { formatCurrency } from '../utils/formatCurrency';
+import { getShopDetails } from '../utils/shopStorage';
+import { BillPDFDocument } from '../components/BillPDFDocument';
+import SearchableSelect from '../components/SearchableSelect';
 
 
 const CreateBill = () => {
@@ -15,6 +19,8 @@ const CreateBill = () => {
     const [submitting, setSubmitting] = useState(false);
     const [isNewFarmer, setIsNewFarmer] = useState(false);
     const [generatedBillId, setGeneratedBillId] = useState(null);
+    const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
+    const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
     // Review modal state
     const [reviewData, setReviewData] = useState(null); // holds validated form data for review
 
@@ -68,9 +74,47 @@ const CreateBill = () => {
         return () => clearTimeout(delayDebounceFn);
     }, [farmerSearch]);
 
-    // Handle product selection — set price and reset quantity
+    // Handle product selection — merge if duplicate, else set price
     const handleProductChange = (index, productId) => {
-        const product = products.find(p => p._id === productId);
+        if (!productId) return;
+
+        // Check if the same product already exists in another row
+        const existingIndex = watchedItems.findIndex(
+            (item, i) => i !== index && String(item.productId) === String(productId)
+        );
+
+        if (existingIndex !== -1) {
+            // Merge: add 1 to the existing row's quantity
+            const existingQty = Number(watchedItems[existingIndex].quantity || 1) + 1;
+            const price = Number(watchedItems[existingIndex].price || 0);
+            const product = products.find(p => String(p._id) === String(productId));
+
+            if (product && existingQty > product.stock) {
+                toast.error(`Only ${product.stock} units in stock for "${product.name}"`, { id: `stock-dup-${existingIndex}` });
+                return;
+            }
+
+            setValue(`items.${existingIndex}.quantity`, existingQty);
+            setValue(`items.${existingIndex}.total`, price * existingQty);
+
+            // Clear the duplicate row instead of removing it to avoid index shift glitches
+            setValue(`items.${index}.productId`, '');
+            setValue(`items.${index}.price`, 0);
+            setValue(`items.${index}.quantity`, 1);
+            setValue(`items.${index}.total`, 0);
+
+            // Remove the duplicate row if it's not the only row
+            if (fields.length > 1) {
+                remove(index);
+            }
+
+            toast(`"${product?.name}" already in list — quantity updated to ${existingQty}`, {
+                icon: 'ℹ️', id: `dup-${productId}`, duration: 2500
+            });
+            return;
+        }
+
+        const product = products.find(p => String(p._id) === String(productId));
         if (product) {
             setValue(`items.${index}.price`, product.price);
             setValue(`items.${index}.quantity`, 1);
@@ -79,19 +123,26 @@ const CreateBill = () => {
     };
 
     const handleQuantityChange = (index, qty) => {
+        const numQty = Number(qty);
+        if (numQty < 1 || isNaN(numQty)) {
+            setValue(`items.${index}.quantity`, 1);
+            setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
+            return;
+        }
         const price = watchedItems[index]?.price || 0;
         const productId = watchedItems[index]?.productId;
-        const product = products.find(p => p._id === productId);
+        const product = products.find(p => String(p._id) === String(productId));
 
-        if (product && qty > product.stock) {
+        if (product && numQty > product.stock) {
             toast.error(`⚠️ Only ${product.stock} units of "${product.name}" in stock!`, { id: `stock-${index}` });
         }
-        setValue(`items.${index}.total`, price * qty);
+        setValue(`items.${index}.total`, price * numQty);
     };
 
     const subtotal = watchedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
     const tax = 0;
     const total = subtotal + tax;
+
 
     // Step 1: validate → show review modal (no API call yet)
     const onSubmit = async (data) => {
@@ -99,13 +150,30 @@ const CreateBill = () => {
             toast.error('Please select or add a farmer');
             return;
         }
-        if (isNewFarmer && (!data.newFarmer?.name || !data.newFarmer?.village)) {
+        if (isNewFarmer && (!data.newFarmer?.name?.trim() || !data.newFarmer?.village?.trim())) {
             toast.error('Please enter name and village for the new farmer');
             return;
         }
         const validItems = data.items.filter(i => i.productId);
         if (validItems.length === 0) {
             toast.error('Add at least one product');
+            return;
+        }
+        // Validate quantities
+        for (const item of validItems) {
+            if (!item.quantity || Number(item.quantity) < 1) {
+                toast.error('Quantity must be at least 1 for all items');
+                return;
+            }
+            const product = products.find(p => String(p._id) === String(item.productId));
+            if (product && Number(item.quantity) > product.stock) {
+                toast.error(`"${product.name}" has only ${product.stock} units in stock. Please reduce quantity.`);
+                return;
+            }
+        }
+        const billTotal = validItems.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+        if (billTotal <= 0) {
+            toast.error('Bill total must be greater than ₹0');
             return;
         }
         // Show review modal — save data for later confirm
@@ -141,31 +209,82 @@ const CreateBill = () => {
                 })),
                 totalAmount: total,
                 paymentType: data.paymentType,
+                sendWhatsApp: sendToWhatsApp,
             };
 
             const res = await billsAPI.create(payload);
-            toast.success('Bill generated successfully!');
-            setGeneratedBillId(res.data._id);
+            const resData = res?.data || {};
+            setGeneratedBillId(resData._id);
+            if (resData.sentToE164 != null || resData.sentTo != null) {
+                toast.success(`Bill generated & WhatsApp sent to ${resData.farmerName || 'farmer'} — ${resData.sentToE164 || resData.sentTo}`);
+            } else {
+                toast.success('Bill generated successfully!');
+            }
         } catch (err) {
-            toast.error(err.response?.data?.message || 'Failed to generate bill');
+            const msg = err.response?.data?.message || err.message || 'Failed to generate bill';
+            toast.error(msg);
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    // Generate bill PDF with react-pdf (used for both view and download); use shop details from Settings
+    const generateBillPDFBlob = async () => {
+        const { data: bill } = await billsAPI.getById(generatedBillId);
+        if (!bill) throw new Error('Bill not found');
+        const shopDetails = getShopDetails();
+        return await pdf(<BillPDFDocument bill={bill} shopDetails={shopDetails} />).toBlob();
+    };
+
+    const handleViewPDF = async () => {
+        if (!generatedBillId) return;
+        try {
+            const blob = await generateBillPDFBlob();
+            const url = window.URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener,noreferrer');
+            toast.success('PDF opened in new tab');
+            setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to generate PDF');
         }
     };
 
     const handleDownloadPDF = async () => {
         if (!generatedBillId) return;
         try {
-            const res = await billsAPI.downloadPDF(generatedBillId);
-            const url = window.URL.createObjectURL(new Blob([res.data]));
+            const blob = await generateBillPDFBlob();
+            const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
             link.setAttribute('download', `Bill_${generatedBillId}.pdf`);
             document.body.appendChild(link);
             link.click();
             link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('PDF downloaded');
         } catch (err) {
-            toast.error('Failed to download PDF');
+            toast.error(err.response?.data?.message || 'Failed to download PDF');
+        }
+    };
+
+    const handleSendWhatsApp = async () => {
+        if (!generatedBillId) {
+            toast.error('Generate a bill first');
+            return;
+        }
+        setSendingWhatsApp(true);
+        try {
+            const res = await billsAPI.sendWhatsApp(generatedBillId);
+            const sentTo = res?.data?.sentTo;
+            const sentToE164 = res?.data?.sentToE164;
+            const name = res?.data?.farmerName;
+            toast.success(sentTo
+                ? `WhatsApp sent to ${name || 'farmer'} — number used: ${sentToE164 || sentTo}`
+                : 'Bill sent to farmer via WhatsApp');
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to send WhatsApp');
+        } finally {
+            setSendingWhatsApp(false);
         }
     };
 
@@ -258,24 +377,31 @@ const CreateBill = () => {
                             )}
                         </div>
 
-                        {/* Products */}
-                        <div className="card p-5">
-                            <div className="flex items-center justify-between mb-4">
+                        {/* Products - scroll when many rows (15+) */}
+                        <div className="card p-5 flex flex-col min-h-0">
+                            <div className="flex items-center justify-between mb-4 shrink-0">
                                 <h3 className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                                     <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>inventory_2</span>
                                     Add Products
                                 </h3>
                                 <button
                                     type="button"
-                                    onClick={() => append({ productId: '', quantity: 1, price: 0, total: 0 })}
-                                    className="btn-secondary text-xs"
+                                    onClick={() => {
+                                        const hasEmptyRow = watchedItems.some(i => !i.productId);
+                                        if (hasEmptyRow) {
+                                            toast('Fill the empty product row first', { icon: '⚠️', id: 'empty-row', duration: 2000 });
+                                            return;
+                                        }
+                                        append({ productId: '', quantity: 1, price: 0, total: 0 });
+                                    }}
+                                    disabled={!!generatedBillId}
+                                    className="btn-secondary text-xs disabled:opacity-40"
                                 >
                                     <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>add</span>
                                     Add Row
                                 </button>
                             </div>
-
-                            <div className="overflow-x-auto">
+                            <div className="min-h-0 max-h-[280px] overflow-auto">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="bg-slate-50 dark:bg-slate-800/60">
@@ -290,22 +416,29 @@ const CreateBill = () => {
                                         {fields.map((field, index) => (
                                             <tr key={field.id} className="border-t border-slate-100 dark:border-slate-800">
                                                 <td className="px-3 py-2">
-                                                    <select
-                                                        {...register(`items.${index}.productId`)}
-                                                        onChange={e => { handleProductChange(index, e.target.value); register(`items.${index}.productId`).onChange(e); }}
-                                                        className="input text-xs py-1.5"
-                                                    >
-                                                        <option value="">Select product...</option>
-                                                        {products.map(p => (
-                                                            <option key={p._id} value={p._id}>{p.name} (Stock: {p.stock})</option>
-                                                        ))}
-                                                    </select>
+                                                    <SearchableSelect
+                                                        products={products}
+                                                        value={watchedItems[index]?.productId}
+                                                        onChange={(productId) => {
+                                                            setValue(`items.${index}.productId`, productId);
+                                                            handleProductChange(index, productId);
+                                                        }}
+                                                        placeholder="Select product..."
+                                                        className="input text-xs py-1.5 w-full"
+                                                    />
                                                 </td>
                                                 <td className="px-3 py-2">
                                                     <input
                                                         type="number"
                                                         min={1}
-                                                        {...register(`items.${index}.quantity`, { min: 1 })}
+                                                        {...register(`items.${index}.quantity`, { min: 1, valueAsNumber: true })}
+                                                        onBlur={e => {
+                                                            const v = Number(e.target.value);
+                                                            if (!v || v < 1) {
+                                                                setValue(`items.${index}.quantity`, 1);
+                                                                setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
+                                                            }
+                                                        }}
                                                         onChange={e => { handleQuantityChange(index, Number(e.target.value)); register(`items.${index}.quantity`).onChange(e); }}
                                                         className="input text-xs py-1.5 w-16"
                                                     />
@@ -356,6 +489,15 @@ const CreateBill = () => {
                                     </label>
                                 ))}
                             </div>
+                            <label className="flex items-center gap-3 mt-4 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={sendToWhatsApp}
+                                    onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                                    className="rounded border-slate-300 text-primary focus:ring-primary"
+                                />
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Send bill to WhatsApp</span>
+                            </label>
                         </div>
                     </div>
 
@@ -406,11 +548,28 @@ const CreateBill = () => {
                                     <div className="flex flex-col gap-2 animate-bounce-in">
                                         <button
                                             type="button"
+                                            onClick={handleViewPDF}
+                                            className="btn-primary w-full text-sm"
+                                        >
+                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>picture_as_pdf</span>
+                                            View PDF
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={handleDownloadPDF}
                                             className="btn-outline w-full text-sm hover:bg-slate-50"
                                         >
                                             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
                                             Download PDF
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleSendWhatsApp}
+                                            disabled={sendingWhatsApp}
+                                            className="btn-outline w-full text-sm text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50"
+                                        >
+                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>chat</span>
+                                            {sendingWhatsApp ? 'Sending...' : 'Send WhatsApp'}
                                         </button>
                                         <button
                                             type="button"
@@ -422,11 +581,6 @@ const CreateBill = () => {
                                         </button>
                                     </div>
                                 )}
-
-                                <button type="button" className="btn-outline w-full text-sm text-emerald-600 border-emerald-200 hover:bg-emerald-50">
-                                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>chat</span>
-                                    Send WhatsApp
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -461,6 +615,7 @@ const CreateBill = () => {
 
                         {/* Items Table */}
                         <div className="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+                            <div className="max-h-52 overflow-auto">
                             <table className="w-full text-left">
                                 <thead>
                                     <tr className="bg-slate-50 dark:bg-slate-800/60">
@@ -484,6 +639,7 @@ const CreateBill = () => {
                                     })}
                                 </tbody>
                             </table>
+                            </div>
                         </div>
 
                         {/* Total + Payment Type */}

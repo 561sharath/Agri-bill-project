@@ -45,8 +45,8 @@ const AppLayout = () => {
         if (path.includes('farmers')) return 'Farmers Directory';
         if (path.includes('inventory')) return 'Inventory Management';
         if (path.includes('credit-ledger')) return 'Credit Ledger';
-        if (path.includes('credit-payment-history')) return 'Credit Payment History';
-        if (path.includes('payments')) return 'Payment History';
+        if (path === '/payments') return 'Record Payment';
+        if (path.includes('credit-payment-history')) return 'Credit & Payments';
         if (path.includes('reports')) return 'Analytics & Reports';
         if (path.includes('settings')) return 'Settings';
         return 'AgriBill';
@@ -70,7 +70,7 @@ const AppLayout = () => {
 
             <main className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <Navbar title={getPageTitle()} onMobileMenuToggle={() => setMobileMenuOpen(true)} />
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                     <Suspense fallback={<PageLoader />}>
                         <Routes>
                             <Route path="/" element={<Dashboard />} />

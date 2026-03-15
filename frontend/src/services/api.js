@@ -71,7 +71,12 @@ export const billsAPI = {
     getById: (id) => api.get(`/bills/${id}`),
     create: (data) => api.post('/bills', data),
     downloadPDF: (id) => api.get(`/bills/${id}/pdf`, { responseType: 'blob' }),
-    sendWhatsApp: (id) => api.post(`/bills/${id}/whatsapp`),
+    sendWhatsApp: (id) => api.post(`/bills/send-whatsapp/${id}`),
+};
+
+// ─── Reminders ───────────────────────────────────────────────────────────────
+export const remindersAPI = {
+    sendReminder: (farmerId) => api.post('/reminders/send', { farmerId }),
 };
 
 // ─── Payments ────────────────────────────────────────────────────────────────
@@ -87,6 +92,8 @@ export const reportsAPI = {
     getMonthlySales: (params) => api.get('/reports/monthly-sales', { params }),
     getTopProducts: (params) => api.get('/reports/top-products', { params }),
     getCreditReport: (params) => api.get('/reports/credit', { params }),
+    getCreditStatement: (params) => api.get('/reports/credit-statement', { params }),
+    getCreditStatementExport: (params) => api.get('/reports/export-credit-statement', { params }),
     exportCSV: (type, params) => api.get(`/reports/export/${type}`, { params, responseType: 'blob' }),
 };
 

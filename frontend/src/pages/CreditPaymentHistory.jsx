@@ -1,44 +1,61 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { paymentsAPI } from '../services/api';
+import { pdf } from '@react-pdf/renderer';
+import { reportsAPI, farmersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
-
-// Get today's date in YYYY-MM-DD format
-const todayStr = () => new Date().toISOString().split('T')[0];
+import { StatementPDFDocument } from '../components/StatementPDFDocument';
 
 const CreditPaymentHistory = () => {
-    const [payments, setPayments] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [statement, setStatement] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [exportingCsv, setExportingCsv] = useState(false);
+    const [exportingPdf, setExportingPdf] = useState(false);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalRecords, setTotalRecords] = useState(0);
-    const [exporting, setExporting] = useState(false);
+    const [farmerSearch, setFarmerSearch] = useState('');
+    const [farmerResults, setFarmerResults] = useState([]);
+    const [selectedFarmer, setSelectedFarmer] = useState(null);
+    const [filters, setFilters] = useState({ startDate: '', endDate: '' });
 
-    // Default: today's date
-    const [filters, setFilters] = useState({
-        startDate: todayStr(),
-        endDate: todayStr(),
-    });
-
-    const fetchPayments = async (p = page, f = filters) => {
+    const fetchStatement = async (p = page) => {
         setLoading(true);
         try {
-            const params = { page: p, limit: 20 };
-            if (f.startDate) params.startDate = f.startDate;
-            if (f.endDate) params.endDate = f.endDate;
-            const res = await paymentsAPI.getAll(params);
-            setPayments(res.data.data || []);
+            const params = { page: p, limit: 30 };
+            if (selectedFarmer?._id) params.farmerId = selectedFarmer._id;
+            if (filters.startDate) params.startDate = filters.startDate;
+            if (filters.endDate) params.endDate = filters.endDate;
+            const res = await reportsAPI.getCreditStatement(params);
+            setStatement(res.data.data || []);
             setTotalPages(res.data.totalPages || 1);
             setTotalRecords(res.data.totalRecords || 0);
         } catch {
-            toast.error('Failed to load credit payment history');
+            toast.error('Failed to load credit statement');
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => { fetchPayments(page, filters); }, [page, filters]);
+    useEffect(() => {
+        fetchStatement(page);
+    }, [page, selectedFarmer?._id, filters.startDate, filters.endDate]);
+
+    useEffect(() => {
+        const t = setTimeout(async () => {
+            if (farmerSearch.length >= 2) {
+                try {
+                    const res = await farmersAPI.search(farmerSearch);
+                    setFarmerResults(res.data || []);
+                } catch {
+                    setFarmerResults([]);
+                }
+            } else {
+                setFarmerResults([]);
+            }
+        }, 300);
+        return () => clearTimeout(t);
+    }, [farmerSearch]);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
@@ -47,153 +64,190 @@ const CreditPaymentHistory = () => {
     };
 
     const handleClearFilters = () => {
-        setFilters({ startDate: todayStr(), endDate: todayStr() });
+        setSelectedFarmer(null);
+        setFarmerSearch('');
+        setFilters({ startDate: '', endDate: '' });
         setPage(1);
     };
 
-    const handleExport = async () => {
-        setExporting(true);
+    const exportParams = () => {
+        const p = {};
+        if (selectedFarmer?._id) p.farmerId = selectedFarmer._id;
+        if (filters.startDate) p.startDate = filters.startDate;
+        if (filters.endDate) p.endDate = filters.endDate;
+        return p;
+    };
+
+    const handleExportCSV = async () => {
+        setExportingCsv(true);
         try {
-            const params = {};
-            if (filters.startDate) params.startDate = filters.startDate;
-            if (filters.endDate) params.endDate = filters.endDate;
-            const res = await paymentsAPI.exportExcel(params);
-            const url = window.URL.createObjectURL(
-                new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-            );
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `credit-payment-history-${filters.startDate || 'all'}-to-${filters.endDate || 'today'}.xlsx`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            toast.success('Excel downloaded!');
-        } catch {
-            toast.error('Export failed');
+            const res = await reportsAPI.getCreditStatementExport(exportParams());
+            const rows = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
+            const header = 'Date,Farmer Name,Transaction Type,Description,Debit (₹),Credit (₹),Balance (₹)\n';
+            const escape = (v) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`);
+            const rowToCsv = (r) => [
+                formatDate(r.date),
+                r.farmerName ?? '',
+                r.type ?? '',
+                r.description ?? '',
+                r.debit ?? 0,
+                r.credit ?? 0,
+                r.balance ?? '',
+            ].map(escape).join(',');
+            const csv = header + rows.map(rowToCsv).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `credit-statement-${filters.startDate || 'all'}-to-${filters.endDate || 'all'}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast.success('CSV downloaded');
+        } catch (err) {
+            console.error('CSV export error', err);
+            toast.error(err.response?.data?.message || 'Export failed');
         } finally {
-            setExporting(false);
+            setExportingCsv(false);
         }
     };
 
-    const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
-
-    const methodBadge = (method) => {
-        const map = { cash: 'badge-success', upi: 'badge-primary', bank: 'badge-info', cheque: 'badge-warning' };
-        return <span className={`badge ${map[method] || 'badge-info'} capitalize`}>{method}</span>;
+    const handleExportPDF = async () => {
+        setExportingPdf(true);
+        try {
+            const res = await reportsAPI.getCreditStatementExport(exportParams());
+            const rows = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
+            const blob = await pdf(<StatementPDFDocument rows={rows} />).toBlob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `credit-statement-${filters.startDate || 'all'}.pdf`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast.success('PDF downloaded');
+        } catch (err) {
+            console.error('PDF export error', err);
+            toast.error(err.response?.data?.message || 'Export failed');
+        } finally {
+            setExportingPdf(false);
+        }
     };
-
-    const isCustomFilter = filters.startDate !== todayStr() || filters.endDate !== todayStr();
 
     return (
         <div className="p-6 flex flex-col gap-6 animate-fade-in">
-            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="page-title">Credit Payment History</h1>
-                    <p className="page-subtitle">Track credit-clearing payments by date. Defaults to today.</p>
+                    <h1 className="page-title">Credit & Payments</h1>
+                <p className="page-subtitle">Full credit statement (bills + payments) like a bank statement. Search by farmer or filter by date.</p>
                 </div>
-                <button onClick={handleExport} disabled={exporting} className="btn-outline">
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
-                    {exporting ? 'Exporting...' : 'Download Excel'}
-                </button>
+                <div className="flex gap-2">
+                    <button type="button" onClick={handleExportCSV} disabled={exportingCsv} className="btn-outline text-sm">
+                        {exportingCsv ? '...' : 'Download CSV'}
+                    </button>
+                    <button type="button" onClick={handleExportPDF} disabled={exportingPdf} className="btn-outline text-sm">
+                        {exportingPdf ? '...' : 'Download PDF'}
+                    </button>
+                </div>
             </div>
 
-            {/* Date Filter */}
-            <div className="card p-4 flex flex-col sm:flex-row gap-3 items-end">
-                <div className="flex-1">
+            <div className="card p-4 flex flex-col sm:flex-row gap-4 flex-wrap items-end">
+                <div className="flex-1 min-w-[200px]">
+                    <label className="label">Search / Select Farmer</label>
+                    <input
+                        type="text"
+                        value={selectedFarmer ? selectedFarmer.name : farmerSearch}
+                        onChange={(e) => {
+                            if (selectedFarmer) setSelectedFarmer(null);
+                            setFarmerSearch(e.target.value);
+                        }}
+                        placeholder="Name or mobile..."
+                        className="input"
+                    />
+                    {farmerResults.length > 0 && !selectedFarmer && (
+                        <ul className="mt-1 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 shadow-lg max-h-48 overflow-y-auto">
+                            {farmerResults.map((f) => (
+                                <li
+                                    key={f._id}
+                                    onClick={() => {
+                                        setSelectedFarmer(f);
+                                        setFarmerSearch('');
+                                        setFarmerResults([]);
+                                        setPage(1);
+                                    }}
+                                    className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm"
+                                >
+                                    <span className="font-medium">{f.name}</span>
+                                    <span className="text-slate-500 ml-2">{f.mobile}</span>
+                                    <span className="text-slate-400 ml-2">{f.village}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {selectedFarmer && (
+                        <p className="mt-1 text-xs text-slate-500">
+                            Showing statement for <strong>{selectedFarmer.name}</strong>. Clear filters to see all.
+                        </p>
+                    )}
+                </div>
+                <div className="flex-1 min-w-[140px]">
                     <label className="label">Start Date</label>
                     <input type="date" name="startDate" value={filters.startDate} onChange={handleFilterChange} className="input" />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-[140px]">
                     <label className="label">End Date</label>
                     <input type="date" name="endDate" value={filters.endDate} onChange={handleFilterChange} className="input" min={filters.startDate} />
                 </div>
-                {isCustomFilter && (
-                    <button onClick={handleClearFilters} className="btn-outline text-sm shrink-0">
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>today</span>
-                        Reset to Today
-                    </button>
-                )}
+                <button type="button" onClick={handleClearFilters} className="btn-outline text-sm">
+                    Clear filters
+                </button>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                    { label: 'Amount Collected', value: formatCurrency(totalCollected), icon: 'payments', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/10' },
-                    { label: 'Total Transactions', value: totalRecords, icon: 'receipt', color: 'text-primary', bg: 'bg-primary/5' },
-                    {
-                        label: 'Period',
-                        value: filters.startDate === filters.endDate
-                            ? new Date(filters.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                            : `${new Date(filters.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(filters.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`,
-                        icon: 'calendar_month',
-                        color: 'text-blue-600',
-                        bg: 'bg-blue-50 dark:bg-blue-900/10'
-                    },
-                ].map((s, i) => (
-                    <div key={i} className="card p-5 flex items-center gap-4">
-                        <div className={`h-12 w-12 rounded-2xl ${s.bg} flex items-center justify-center shrink-0`}>
-                            <span className={`material-symbols-outlined ${s.color}`} style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>{s.icon}</span>
-                        </div>
-                        <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase">{s.label}</p>
-                            <p className="text-xl font-black text-slate-800 dark:text-slate-100">{s.value}</p>
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Table */}
-            <div className="card overflow-hidden">
-                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <h3 className="font-bold">Credit Payment Records</h3>
+            <div className="card overflow-hidden flex flex-col min-h-0">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+                    <h3 className="font-bold">Credit Statement (Bills + Payments)</h3>
                     <span className="text-xs text-slate-400">{totalRecords} transactions</span>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="min-h-0 max-h-[50vh] overflow-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-slate-50 dark:bg-slate-800/60">
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">#</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Farmer</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Mobile</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Date</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase text-right">Amount</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Method</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Notes</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase">Ref ID</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Date</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Type</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Farmer</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Description</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Debit (₹)</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Credit (₹)</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Balance (₹)</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                             {loading ? (
                                 [...Array(5)].map((_, i) => (
                                     <tr key={i} className="animate-pulse">
-                                        <td colSpan={8} className="px-5 py-4">
-                                            <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" />
-                                        </td>
+                                        <td colSpan={7} className="px-4 py-4"><div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" /></td>
                                     </tr>
                                 ))
-                            ) : payments.length === 0 ? (
+                            ) : statement.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-5 py-12 text-center">
-                                        <span className="material-symbols-outlined block text-4xl mb-3 text-slate-300">payments</span>
-                                        <p className="text-slate-400 text-sm">No credit payments found for this date range</p>
-                                        <p className="text-slate-300 text-xs mt-1">Try selecting a different date</p>
+                                    <td colSpan={7} className="px-4 py-12 text-center">
+                                        <span className="material-symbols-outlined block text-4xl mb-3 text-slate-300">account_balance</span>
+                                        <p className="text-slate-400 text-sm">No transactions in this period</p>
+                                        <p className="text-slate-300 text-xs mt-1">Select a farmer or adjust date range</p>
                                     </td>
                                 </tr>
                             ) : (
-                                payments.map((payment, idx) => (
-                                    <tr key={payment._id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                        <td className="px-5 py-4 text-xs text-slate-400">{(page - 1) * 20 + idx + 1}</td>
-                                        <td className="px-5 py-4">
-                                            <p className="font-bold text-sm">{payment.farmerId?.name || payment.farmerName || 'Unknown'}</p>
-                                            <p className="text-xs text-slate-400">{payment.farmerId?.village || '-'}</p>
+                                statement.map((row, idx) => (
+                                    <tr key={`${row.type}-${row.ref}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{formatDate(row.date)}</td>
+                                        <td className="px-4 py-3">
+                                            <span className={`badge ${row.type === 'bill' ? 'badge-warning' : 'badge-success'}`}>
+                                                {row.type === 'bill' ? 'Bill' : 'Payment'}
+                                            </span>
                                         </td>
-                                        <td className="px-5 py-4 text-sm font-mono text-slate-500">{payment.farmerId?.mobile || payment.farmerMobile || '-'}</td>
-                                        <td className="px-5 py-4 text-sm text-slate-500">{formatDate(payment.date)}</td>
-                                        <td className="px-5 py-4 text-right font-black text-emerald-600">{formatCurrency(payment.amount)}</td>
-                                        <td className="px-5 py-4">{methodBadge(payment.method)}</td>
-                                        <td className="px-5 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">{payment.notes || '-'}</td>
-                                        <td className="px-5 py-4 text-xs text-slate-400 font-mono">{payment._id?.toString().slice(-8)}</td>
+                                        <td className="px-4 py-3 text-sm font-medium">{row.farmerName || '-'}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 max-w-[180px] truncate">{row.description || '-'}</td>
+                                        <td className="px-4 py-3 text-right font-medium text-red-600">{row.debit ? formatCurrency(row.debit) : '–'}</td>
+                                        <td className="px-4 py-3 text-right font-medium text-emerald-600">{row.credit ? formatCurrency(row.credit) : '–'}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200">{formatCurrency(row.balance)}</td>
                                     </tr>
                                 ))
                             )}
@@ -205,8 +259,8 @@ const CreditPaymentHistory = () => {
                         currentPage={page}
                         totalPages={totalPages}
                         totalRecords={totalRecords}
-                        onPageChange={(p) => { setPage(p); fetchPayments(p, filters); }}
-                        limit={20}
+                        onPageChange={setPage}
+                        limit={30}
                     />
                 </div>
             </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
+import { useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { paymentsAPI, farmersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
@@ -87,8 +88,8 @@ const FarmerSearchSelect = ({ onSelect, selectedFarmer, onClear }) => {
 };
 
 // ─── Record Payment Modal ──────────────────────────────────────────────────────
-const RecordPaymentModal = ({ onClose, onSave }) => {
-    const [selectedFarmer, setSelectedFarmer] = useState(null);
+const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
+    const [selectedFarmer, setSelectedFarmer] = useState(initialFarmer);
     const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm();
 
     const onSubmit = async (data) => {
@@ -181,9 +182,11 @@ const todayStr = () => new Date().toISOString().split('T')[0];
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 const Payments = () => {
+    const location = useLocation();
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
+    const [showModal, setShowModal] = useState(!!location.state?.farmer);
+    const [preselectedFarmer] = useState(location.state?.farmer || null);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalRecords, setTotalRecords] = useState(0);
@@ -369,6 +372,7 @@ const Payments = () => {
                 <RecordPaymentModal
                     onClose={() => setShowModal(false)}
                     onSave={() => { setShowModal(false); fetchPayments(1, filters); setPage(1); }}
+                    initialFarmer={preselectedFarmer}
                 />
             )}
         </div>

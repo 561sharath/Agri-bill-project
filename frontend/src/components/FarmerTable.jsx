@@ -398,7 +398,7 @@ const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onRefr
                     </div>
                 )}
 
-                <div className="overflow-x-auto">
+                <div className="overflow-auto min-h-0 max-h-[55vh]">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-slate-50 dark:bg-slate-800/60">

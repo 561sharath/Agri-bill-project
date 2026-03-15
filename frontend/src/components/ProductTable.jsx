@@ -35,8 +35,8 @@ const ProductTable = ({ products = [], loading = false, onEdit, onDelete, showAc
     };
 
     return (
-        <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
+        <div className="card overflow-hidden flex flex-col min-h-0">
+            <div className="overflow-auto min-h-0 max-h-[60vh]">
                 <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="bg-slate-50 dark:bg-slate-800/60">

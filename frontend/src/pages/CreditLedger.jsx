@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { reportsAPI } from '../services/api';
+import { reportsAPI, remindersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
 
 const CreditLedger = () => {
+    const navigate = useNavigate();
     const [page, setPage] = useState(1);
+    const [sendingReminderFor, setSendingReminderFor] = useState(null);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [totalPages, setTotalPages] = useState(1);
@@ -19,11 +22,8 @@ const CreditLedger = () => {
             setData(res.data.data);
             setTotalPages(res.data.totalPages);
             setTotalRecords(res.data.totalRecords);
-
-            // Calculate summary for UI
-            const total = res.data.data.reduce((sum, f) => sum + f.creditBalance, 0);
             setSummary({
-                totalOutstanding: total, // Simplified for current page, ideally from backend
+                totalOutstanding: res.data.totalOutstanding || 0,
                 count: res.data.totalRecords
             });
         } catch (err) {
@@ -43,6 +43,25 @@ const CreditLedger = () => {
         return <span className="badge badge-info">Regular</span>;
     };
 
+    const handleSendReminder = async (farmer) => {
+        if (!farmer.mobile || farmer.mobile.length < 10) {
+            toast.error('No valid mobile number for this farmer');
+            return;
+        }
+        setSendingReminderFor(farmer._id);
+        try {
+            const res = await remindersAPI.sendReminder(String(farmer._id));
+            const sentToE164 = res?.data?.sentToE164 || res?.data?.sentTo;
+            toast.success(sentToE164
+                ? `Reminder sent to ${farmer.name} — ${sentToE164}`
+                : `Reminder sent to ${farmer.name} via WhatsApp`);
+        } catch (err) {
+            toast.error(err.response?.data?.message || err.message || 'Failed to send reminder');
+        } finally {
+            setSendingReminderFor(null);
+        }
+    };
+
     return (
         <div className="p-6 flex flex-col gap-6 animate-fade-in">
             <div>
@@ -55,8 +74,7 @@ const CreditLedger = () => {
                 <div className="card p-5 border-l-4 border-orange-500 bg-orange-50/30 dark:bg-orange-900/10">
                     <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Outstanding</p>
                     <p className="text-2xl font-black text-orange-600">
-                        {formatCurrency(totalRecords > 0 ? summary.totalOutstanding : 0)}
-                        <span className="text-xs font-normal text-slate-400 ml-1">(Current Page)</span>
+                        {formatCurrency(summary.totalOutstanding)}
                     </p>
                 </div>
                 <div className="card p-5 border-l-4 border-blue-500 bg-blue-50/30 dark:bg-blue-900/10">
@@ -105,14 +123,24 @@ const CreditLedger = () => {
                                             <span className="text-sm font-black text-red-600">{formatCurrency(farmer.creditBalance)}</span>
                                         </td>
                                         <td className="px-4 py-4">{getStatusBadge(farmer.creditBalance)}</td>
-                                        <td className="px-4 py-4 text-center">
-                                            <button
-                                                onClick={() => toast.success('Reminders sent manually coming soon')}
-                                                className="btn-secondary text-xs px-3 py-2 gap-1.5"
-                                            >
-                                                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>notifications_active</span>
-                                                Remind
-                                            </button>
+                                        <td className="px-4 py-4">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <button
+                                                    onClick={() => navigate('/payments', { state: { farmer } })}
+                                                    className="btn-primary text-xs px-3 py-2 gap-1.5"
+                                                >
+                                                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>payments</span>
+                                                    Record
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSendReminder(farmer)}
+                                                    disabled={sendingReminderFor === farmer._id}
+                                                    className="btn-secondary text-xs px-3 py-2 gap-1.5 disabled:opacity-50"
+                                                >
+                                                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>notifications_active</span>
+                                                    {sendingReminderFor === farmer._id ? 'Sending...' : 'Remind'}
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
