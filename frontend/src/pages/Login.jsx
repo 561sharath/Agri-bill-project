@@ -103,9 +103,9 @@ const Login = () => {
                             )}
                         </button>
 
-                        <p className="text-center text-xs text-slate-500 mt-2">
+                        {/* <p className="text-center text-xs text-slate-500 mt-2">
                             Demo Account — User: <span className="font-mono">admin@agribill.com</span> | Pass: <span className="font-mono">123456</span>
-                        </p>
+                        </p> */}
                     </form>
                 </div>
             </div>

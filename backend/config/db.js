@@ -17,15 +17,14 @@ const connectDB = async () => {
 
         // Seed default admin user if none exists
         const userCount = await User.countDocuments();
-        if (userCount === 0) {
-            await User.create({
-                name: 'Admin User',
-                email: 'admin@agribill.com',
-                password: '123456', // Will be hashed by pre-save hook
-                role: 'admin'
-            });
-            console.log('Default admin user seeded: admin@agribill.com / 123456');
-        }
+        // if (userCount === 0) {
+        //     await User.create({
+        //         name: 'Admin User',
+        //         email: 'venkatadmin@gmail.com',
+        //         password: 'Venkat123', // Will be hashed by pre-save hook
+        //         role: 'admin'
+        //     });
+        // }
     } catch (error) {
         console.error(`Error: ${error.message}`);
         process.exit(1);
