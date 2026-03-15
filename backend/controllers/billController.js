@@ -106,7 +106,7 @@ export const createBill = async (req, res, next) => {
                 fs.mkdirSync(BILLS_DIR, { recursive: true });
                 fs.writeFileSync(pdfPath, pdfBuffer);
                 const pdfUrl = `${baseUrl}/bills/${billId}.pdf`;
-                await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl);
+                await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl, bill.paymentType);
                 whatsAppResponse = {
                     success: true,
                     message: 'Bill sent via WhatsApp',
@@ -236,7 +236,7 @@ export const sendBillWhatsApp = async (req, res, next) => {
         fs.mkdirSync(BILLS_DIR, { recursive: true });
         fs.writeFileSync(pdfPath, pdfBuffer);
         const pdfUrl = `${baseUrl}/bills/${billId}.pdf`;
-        await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl);
+        await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl, bill.paymentType);
         res.json({
             success: true,
             message: 'Bill sent via WhatsApp',

@@ -3,7 +3,8 @@ import {
     createPayment,
     getPayments,
     exportPaymentsExcel,
-    getPaymentsByFarmer
+    getPaymentsByFarmer,
+    sendPaymentWhatsApp
 } from '../controllers/paymentController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -15,5 +16,6 @@ router.route('/')
 
 router.get('/export', protect, exportPaymentsExcel);
 router.get('/farmer/:farmerId', protect, getPaymentsByFarmer);
+router.post('/:id/send-whatsapp', protect, sendPaymentWhatsApp);
 
 export default router;
