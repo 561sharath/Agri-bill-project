@@ -2,12 +2,14 @@ import Payment from '../models/Payment.js';
 import Farmer from '../models/Farmer.js';
 import Bill from '../models/Bill.js';
 import ExcelJS from 'exceljs';
+import { sendPaymentConfirmationWhatsApp, sendCreditClearedWhatsApp } from '../services/whatsappService.js';
 
 // @desc    Record new payment and update farmer balance
 // @route   POST /api/payments
 // @access  Private
+// Body may include sendWhatsApp: true to auto-send confirmation; credit cleared message sent when balance becomes 0
 export const createPayment = async (req, res, next) => {
-    const { farmerId, amount, method, date, notes } = req.body;
+    const { farmerId, amount, method, date, notes, sendWhatsApp } = req.body;
 
     try {
         const farmer = await Farmer.findById(farmerId);
@@ -30,11 +32,20 @@ export const createPayment = async (req, res, next) => {
 
         // Populate farmer info before responding
         const populated = await payment.populate('farmerId', 'name mobile village creditBalance');
+        const payload = { ...populated.toObject(), farmerCreditBalance: farmer.creditBalance };
 
-        res.status(201).json({
-            ...populated.toObject(),
-            farmerCreditBalance: farmer.creditBalance
-        });
+        // Auto-send WhatsApp: one confirmation message covers both partial and fully-cleared cases
+        if (sendWhatsApp !== false && (farmer.mobile || '').replace(/\D/g, '').length >= 10) {
+            try {
+                await sendPaymentConfirmationWhatsApp(populated);
+                payload.whatsAppSent = true;
+            } catch (waErr) {
+                console.warn('[Payment] WhatsApp send failed:', waErr?.message);
+                payload.whatsAppSent = false;
+            }
+        }
+
+        res.status(201).json(payload);
     } catch (error) {
         next(error);
     }
@@ -197,6 +208,37 @@ export const getPaymentsByFarmer = async (req, res, next) => {
             .sort({ date: -1 });
         res.json(payments);
     } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Send payment confirmation via WhatsApp for an existing payment (manual trigger)
+// @route   POST /api/payments/:id/send-whatsapp
+// @access  Private
+export const sendPaymentWhatsApp = async (req, res, next) => {
+    try {
+        const payment = await Payment.findById(req.params.id)
+            .populate('farmerId', 'name mobile village creditBalance');
+        if (!payment) {
+            res.status(404);
+            throw new Error('Payment not found');
+        }
+        const farmer = payment.farmerId;
+        if (!farmer?.mobile || String(farmer.mobile).replace(/\D/g, '').length < 10) {
+            return res.status(400).json({ message: 'Farmer has no valid mobile number' });
+        }
+        await sendPaymentConfirmationWhatsApp(payment);
+        res.json({
+            success: true,
+            message: 'Payment confirmation sent via WhatsApp',
+            sentTo: farmer.mobile,
+            farmerName: farmer.name,
+        });
+    } catch (error) {
+        const msg = error?.message || '';
+        if (msg.includes('not configured') || msg.includes('CHATMITRA')) {
+            return res.status(503).json({ message: 'WhatsApp not configured. Add CHATMITRA_API_TOKEN in backend .env' });
+        }
         next(error);
     }
 };

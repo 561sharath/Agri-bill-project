@@ -85,6 +85,7 @@ export const paymentsAPI = {
     create: (data) => api.post('/payments', data),
     getByFarmer: (farmerId) => api.get(`/payments/farmer/${farmerId}`),
     exportExcel: (params) => api.get('/payments/export', { params, responseType: 'blob' }),
+    sendPaymentWhatsApp: (paymentId) => api.post(`/payments/${paymentId}/send-whatsapp`),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

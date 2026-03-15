@@ -8,6 +8,7 @@ import Pagination from '../components/Pagination';
 const CreditLedger = () => {
     const navigate = useNavigate();
     const [page, setPage] = useState(1);
+    const [search, setSearch] = useState('');
     const [sendingReminderFor, setSendingReminderFor] = useState(null);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -18,7 +19,9 @@ const CreditLedger = () => {
     const fetchCreditReport = async () => {
         setLoading(true);
         try {
-            const res = await reportsAPI.getCreditReport({ page, limit: 10 });
+            const params = { page, limit: 10 };
+            if (search.trim()) params.search = search.trim();
+            const res = await reportsAPI.getCreditReport(params);
             setData(res.data.data);
             setTotalPages(res.data.totalPages);
             setTotalRecords(res.data.totalRecords);
@@ -35,7 +38,7 @@ const CreditLedger = () => {
 
     useEffect(() => {
         fetchCreditReport();
-    }, [page]);
+    }, [page, search]);
 
     const getStatusBadge = (balance) => {
         if (balance > 10000) return <span className="badge badge-danger">High Alert</span>;
@@ -84,6 +87,30 @@ const CreditLedger = () => {
                 <div className="card p-5 border-l-4 border-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/10">
                     <p className="text-xs font-bold text-slate-500 uppercase mb-1">Recovery Target</p>
                     <p className="text-2xl font-black text-emerald-600">₹50,000</p>
+                </div>
+            </div>
+
+            {/* Search */}
+            <div className="card p-4">
+                <label className="label">Search Credit Ledger</label>
+                <div className="relative">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: '18px' }}>search</span>
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                        placeholder="Search by farmer name, mobile, or village..."
+                        className="input pl-10 w-full max-w-md"
+                    />
+                    {search && (
+                        <button
+                            type="button"
+                            onClick={() => { setSearch(''); setPage(1); }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
+                        </button>
+                    )}
                 </div>
             </div>
 

@@ -81,22 +81,33 @@ export const getTopProducts = async (req, res, next) => {
     }
 };
 
-// @desc    Get credit report (farmers with balance)
+// @desc    Get credit report (farmers with balance). Optional ?search= for name/mobile.
 // @route   GET /api/reports/credit
 // @access  Private
 export const getCreditReport = async (req, res, next) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
+        const search = (req.query.search || '').trim();
         const skip = (page - 1) * limit;
 
+        const filter = { creditBalance: { $gt: 0 } };
+        if (search.length >= 1) {
+            const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            filter.$or = [
+                { name: re },
+                { mobile: re },
+                { village: re },
+            ];
+        }
+
         const [totalRecords, totalAgg, farmers] = await Promise.all([
-            Farmer.countDocuments({ creditBalance: { $gt: 0 } }),
+            Farmer.countDocuments(filter),
             Farmer.aggregate([
-                { $match: { creditBalance: { $gt: 0 } } },
+                { $match: filter },
                 { $group: { _id: null, totalOutstanding: { $sum: '$creditBalance' } } }
             ]),
-            Farmer.find({ creditBalance: { $gt: 0 } })
+            Farmer.find(filter)
                 .sort({ creditBalance: -1 })
                 .skip(skip)
                 .limit(limit)
