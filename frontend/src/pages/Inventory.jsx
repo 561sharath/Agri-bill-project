@@ -4,22 +4,37 @@ import toast from 'react-hot-toast';
 import ProductTable from '../components/ProductTable';
 import Pagination from '../components/Pagination';
 import { productsAPI } from '../services/api';
-import { formatCurrency } from '../utils/formatCurrency';
+import useDebounce from '../hooks/useDebounce';
+import TruncatedText from '../components/TruncatedText';
 
 const ProductModal = ({ product, onClose, onSave }) => {
-    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+    // If product exists, we show 'Present Stock' (readonly) and use 'updateStock' input
+    const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm({
         defaultValues: product ? {
             name: product.name,
             brand: product.brand,
             price: product.price,
-            stock: product.stock
+            updateStock: '' // Additional stock to add
         } : { name: '', brand: '', price: '', stock: '' }
     });
+
+    const nameValue = watch('name') || '';
 
     const onSubmit = async (data) => {
         try {
             if (product) {
-                await productsAPI.update(product._id, data);
+                // Determine new total stock
+                const additional = Number(data.updateStock) || 0;
+                if (additional < 0) {
+                    toast.error('Update Stock cannot be negative');
+                    return;
+                }
+                const newTotalStock = (product?.stock || 0) + additional;
+                // Prepare update payload
+                const payload = { ...data, stock: newTotalStock };
+                delete payload.updateStock; // unnecessary for the backend endpoint for standard update
+                
+                await productsAPI.update(product._id, payload);
                 toast.success('Product updated!');
             } else {
                 await productsAPI.create(data);
@@ -42,35 +57,56 @@ const ProductModal = ({ product, onClose, onSave }) => {
                 </div>
                 <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
                     <div>
-                        <label className="label">Product Name * <span className="text-slate-400 font-normal">(max 300 chars)</span></label>
+                        <label className="label">
+                            <TruncatedText text="Product Name *" />
+                        </label>
                         <input
-                            {...register('name', {
-                                required: 'Name is required',
-                                maxLength: { value: 300, message: 'Max 300 characters allowed' }
+                            {...register('name', { 
+                                required: 'Name is required', 
+                                maxLength: { value: 300, message: 'Maximum 300 characters allowed' } 
                             })}
-                            maxLength={300}
-                            className="input"
+                            className={`input w-full ${errors.name ? 'input-invalid' : ''}`}
                             placeholder="e.g. Urea (50kg)"
                         />
-                        {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name.message}</p>}
+                        <div className="flex justify-between items-start mt-1">
+                            {errors.name ? (
+                                <p className="field-error">{errors.name.message}</p>
+                            ) : <div />}
+                            <span className={`char-count ${nameValue.length > 300 ? 'text-red-500' : ''}`}>
+                                {nameValue.length}/300
+                            </span>
+                        </div>
                     </div>
                     <div>
                         <label className="label">Brand</label>
-                        <input {...register('brand')} className="input" placeholder="e.g. IFFCO" />
+                        <input {...register('brand')} className="input w-full" placeholder="e.g. IFFCO" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="label">Price (₹) *</label>
-                            <input type="number" step="0.01" {...register('price', { required: 'Price is required', min: 0 })} className="input" placeholder="1450" />
+                            <input type="number" step="0.01" {...register('price', { required: 'Price is required', min: 0 })} className="input w-full" />
                             {errors.price && <p className="text-xs text-red-500 mt-1">{errors.price.message}</p>}
                         </div>
-                        <div>
-                            <label className="label">Stock (units) *</label>
-                            <input type="number" {...register('stock', { required: 'Stock is required', min: 0 })} className="input" placeholder="50" />
-                            {errors.stock && <p className="text-xs text-red-500 mt-1">{errors.stock.message}</p>}
-                        </div>
+                        {product ? (
+                            <div className="flex flex-col gap-2">
+                                <div>
+                                    <label className="label">Present Stock</label>
+                                    <input type="text" value={product.stock} disabled className="input w-full bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed font-bold" />
+                                </div>
+                                <div>
+                                    <label className="label">Update Stock <span className="text-[10px] text-slate-400 font-normal">(Add)</span></label>
+                                    <input type="number" {...register('updateStock')} className="input w-full" placeholder="+ 0" />
+                                </div>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className="label">Initial Stock *</label>
+                                <input type="number" {...register('stock', { required: 'Stock is required', min: 0 })} className="input w-full" />
+                                {errors.stock && <p className="text-xs text-red-500 mt-1">{errors.stock.message}</p>}
+                            </div>
+                        )}
                     </div>
-                    <div className="flex gap-3 pt-2">
+                    <div className="flex gap-3 pt-4">
                         <button type="button" onClick={onClose} className="btn-outline flex-1">Cancel</button>
                         <button type="submit" disabled={isSubmitting} className="btn-primary flex-1">
                             {isSubmitting ? 'Saving...' : product ? 'Update Product' : 'Add Product'}
@@ -82,6 +118,31 @@ const ProductModal = ({ product, onClose, onSave }) => {
     );
 };
 
+// ─── Delete Confirmation Modal ────────────────────────────────────────────────
+const DeleteProductModal = ({ onClose, onConfirm, deleting }) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div className="card w-full max-w-sm p-6 animate-slide-up shadow-2xl text-center">
+            <div className="h-16 w-16 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined" style={{ fontSize: '32px' }}>delete</span>
+            </div>
+            <h3 className="font-bold text-lg mb-2">Delete Product?</h3>
+            <p className="text-sm text-slate-500 mb-6">
+                Are you sure you want to delete this product? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+                <button onClick={onClose} className="btn-outline flex-1">Cancel</button>
+                <button
+                    onClick={onConfirm}
+                    disabled={deleting}
+                    className="btn-primary flex-1 bg-red-500 hover:bg-red-600"
+                >
+                    {deleting ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
 const Inventory = () => {
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -90,23 +151,34 @@ const Inventory = () => {
     const [totalRecords, setTotalRecords] = useState(0);
     const [editProduct, setEditProduct] = useState(null);
     const [showModal, setShowModal] = useState(false);
+    
+    // Search + Debounce
+    const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
+    // Global Stats state
     const [stats, setStats] = useState({ total: 0, lowStock: 0, critical: 0 });
+    
+    // Delete state
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const fetchStats = async () => {
+        try {
+            const res = await productsAPI.getStats();
+            setStats(res.data);
+        } catch {
+            console.error('Failed to load inventory stats');
+        }
+    };
 
     const fetchProducts = async () => {
         setLoading(true);
         try {
-            const res = await productsAPI.getAll({ page, limit: 10 });
+            const res = await productsAPI.getAll({ page, limit: 10, search: debouncedSearchTerm });
             setProducts(res.data.data);
             setTotalPages(res.data.totalPages);
             setTotalRecords(res.data.totalRecords);
-
-            // Simple stats from current page for UI
-            // Ideally should come from a dedicated stats API
-            setStats({
-                total: res.data.totalRecords,
-                lowStock: res.data.data.filter(p => p.stock <= 20 && p.stock > 5).length,
-                critical: res.data.data.filter(p => p.stock <= 5).length
-            });
         } catch (err) {
             toast.error('Failed to fetch inventory');
         } finally {
@@ -115,17 +187,26 @@ const Inventory = () => {
     };
 
     useEffect(() => {
-        fetchProducts();
-    }, [page]);
+        fetchStats();
+    }, []);
 
-    const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this product?')) return;
+    useEffect(() => {
+        fetchProducts();
+    }, [page, debouncedSearchTerm]);
+
+    const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        setIsDeleting(true);
         try {
-            await productsAPI.delete(id);
+            await productsAPI.delete(deleteTarget);
             toast.success('Product deleted successfully');
+            setDeleteTarget(null);
             fetchProducts();
+            fetchStats();
         } catch (err) {
             toast.error(err.response?.data?.message || 'Delete failed');
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -133,6 +214,7 @@ const Inventory = () => {
         setShowModal(false);
         setEditProduct(null);
         fetchProducts();
+        fetchStats();
     };
 
     return (
@@ -150,31 +232,31 @@ const Inventory = () => {
 
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="card p-5 flex items-center gap-4 border-l-4 border-primary">
+                <div className="card p-5 flex items-center gap-4 border-l-4 border-primary shadow-sm hover:shadow-md transition-shadow">
                     <div className="h-12 w-12 bg-primary/10 rounded-2xl flex items-center justify-center">
                         <span className="material-symbols-outlined text-primary" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>inventory_2</span>
                     </div>
                     <div>
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Products</p>
-                        <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{totalRecords}</p>
+                        <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{stats.total || 0}</p>
                     </div>
                 </div>
-                <div className="card p-5 flex items-center gap-4 border-l-4 border-amber-500">
+                <div className="card p-5 flex items-center gap-4 border-l-4 border-amber-500 shadow-sm hover:shadow-md transition-shadow">
                     <div className="h-12 w-12 bg-amber-50 dark:bg-amber-500/10 rounded-2xl flex items-center justify-center">
                         <span className="material-symbols-outlined text-amber-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>warning</span>
                     </div>
                     <div>
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Low Stock</p>
-                        <p className="text-2xl font-black text-amber-600">{stats.lowStock}</p>
+                        <p className="text-2xl font-black text-amber-600">{stats.lowStock || 0}</p>
                     </div>
                 </div>
-                <div className="card p-5 flex items-center gap-4 border-l-4 border-red-500">
+                <div className="card p-5 flex items-center gap-4 border-l-4 border-red-500 shadow-sm hover:shadow-md transition-shadow">
                     <div className="h-12 w-12 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center">
                         <span className="material-symbols-outlined text-red-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>error</span>
                     </div>
                     <div>
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Critical Stock</p>
-                        <p className="text-2xl font-black text-red-600">{stats.critical}</p>
+                        <p className="text-2xl font-black text-red-600">{stats.critical || 0}</p>
                     </div>
                 </div>
             </div>
@@ -189,12 +271,31 @@ const Inventory = () => {
                 </div>
             )}
 
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 relative">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="relative w-full max-w-sm">
+                        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" style={{ fontSize: '18px' }}>search</span>
+                        {/* 2-second typing indicator */}
+                        {searchTerm !== debouncedSearchTerm && (
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                            </span>
+                        )}
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
+                            placeholder="Search products by name or brand..."
+                            className="input pl-10 w-full"
+                        />
+                    </div>
+                </div>
+
                 <ProductTable
                     products={products}
-                    loading={loading}
+                    loading={loading && products.length === 0}
                     onEdit={p => { setEditProduct(p); setShowModal(true); }}
-                    onDelete={handleDelete}
+                    onDelete={id => setDeleteTarget(id)}
                 />
 
                 <Pagination
@@ -206,11 +307,21 @@ const Inventory = () => {
                 />
             </div>
 
+            {/* Edit / Create Form Modal */}
             {showModal && (
                 <ProductModal
                     product={editProduct}
                     onClose={() => { setShowModal(false); setEditProduct(null); }}
                     onSave={handleSave}
+                />
+            )}
+            
+            {/* Delete Confirmation Modal */}
+            {deleteTarget && (
+                <DeleteProductModal
+                    onClose={() => setDeleteTarget(null)}
+                    onConfirm={confirmDelete}
+                    deleting={isDeleting}
                 />
             )}
         </div>

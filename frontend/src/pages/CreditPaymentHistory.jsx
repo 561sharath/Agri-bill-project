@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { pdf } from '@react-pdf/renderer';
 import { reportsAPI, farmersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
-import { StatementPDFDocument } from '../components/StatementPDFDocument';
+import TruncatedText from '../components/TruncatedText';
 
 const CreditPaymentHistory = () => {
     const [statement, setStatement] = useState([]);
@@ -110,6 +109,11 @@ const CreditPaymentHistory = () => {
         try {
             const res = await reportsAPI.getCreditStatementExport(exportParams());
             const rows = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
+            
+            // Dynamic import to prevent multi-megabyte blocking LCP
+            const { pdf } = await import('@react-pdf/renderer');
+            const { StatementPDFDocument } = await import('../components/StatementPDFDocument');
+            
             const blob = await pdf(<StatementPDFDocument rows={rows} />).toBlob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -203,12 +207,12 @@ const CreditPaymentHistory = () => {
                 </div>
 
                 {/* Table Card */}
-                <div className="card overflow-hidden flex flex-col">
+                <div className="card overflow-hidden flex flex-col min-h-0">
                     <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
                         <h3 className="font-bold">Credit Statement — Bills &amp; Payments</h3>
                         <span className="text-xs text-slate-400">{totalRecords} transaction{totalRecords !== 1 ? 's' : ''}</span>
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto min-h-0 max-h-[50vh] overflow-y-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-slate-50 dark:bg-slate-800/60">
@@ -216,9 +220,9 @@ const CreditPaymentHistory = () => {
                                     <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Type</th>
                                     <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Farmer</th>
                                     <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Description</th>
-                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Debit (Rs)</th>
-                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Credit (Rs)</th>
-                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Balance (Rs)</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Debit (₹)</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Credit (₹)</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Balance (₹)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -241,8 +245,12 @@ const CreditPaymentHistory = () => {
                                         <tr key={`${row.type}-${row.ref}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                                             <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(row.date)}</td>
                                             <td className="px-4 py-3">{typeBadge(row.type)}</td>
-                                            <td className="px-4 py-3 text-sm font-medium">{row.farmerName || '-'}</td>
-                                            <td className="px-4 py-3 text-xs text-slate-500 max-w-[200px] truncate" title={row.description}>{row.description || '-'}</td>
+                                            <td className="px-4 py-3 text-sm font-medium">
+                                                <TruncatedText text={row?.farmerName || '-'} />
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-slate-500">
+                                                <TruncatedText text={row?.description || '-'} />
+                                            </td>
                                             <td className="px-4 py-3 text-right font-medium text-red-600">{row.debit ? formatCurrency(row.debit) : '–'}</td>
                                             <td className="px-4 py-3 text-right font-medium text-emerald-600">{row.credit ? formatCurrency(row.credit) : '–'}</td>
                                             <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200">{formatCurrency(row.balance)}</td>

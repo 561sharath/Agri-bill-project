@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { getShopDetails, saveShopDetails } from '../utils/shopStorage';
+import TruncatedText from '../components/TruncatedText';
 
 const LANG_KEY = 'agribill_lang';
 
@@ -57,12 +58,30 @@ const Settings = () => {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="label">{t('settings.shopName')}</label>
-                            <input value={shopName} onChange={(e) => setShopName(e.target.value)} className="input" />
+                            <label className="label">
+                                <TruncatedText text={t('settings.shopName')} />
+                            </label>
+                            <input 
+                                value={shopName} 
+                                onChange={(e) => setShopName(e.target.value)} 
+                                className={`input ${shopName.length > 300 ? 'input-invalid' : ''}`} 
+                                maxLength={320}
+                            />
+                            <div className="flex justify-between items-start mt-1">
+                                <div />
+                                <span className={`char-count ${shopName.length > 300 ? 'text-red-500' : ''}`}>
+                                    {shopName.length}/300
+                                </span>
+                            </div>
                         </div>
                         <div>
                             <label className="label">{t('settings.contactMobile')}</label>
-                            <input value={mobile} onChange={(e) => setMobile(e.target.value)} className="input" />
+                            <input 
+                                value={mobile} 
+                                onChange={(e) => setMobile(e.target.value)} 
+                                className="input" 
+                                maxLength={15}
+                            />
                         </div>
                     </div>
 
@@ -71,9 +90,16 @@ const Settings = () => {
                         <textarea
                             value={address}
                             onChange={(e) => setAddress(e.target.value)}
-                            className="input resize-none py-3"
+                            className={`input resize-none py-3 ${address.length > 300 ? 'input-invalid' : ''}`}
                             rows="3"
+                            maxLength={350}
                         />
+                        <div className="flex justify-between items-start mt-1">
+                            <div />
+                            <span className={`char-count ${address.length > 300 ? 'text-red-500' : ''}`}>
+                                {address.length}/300
+                            </span>
+                        </div>
                     </div>
 
                     <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -100,7 +126,11 @@ const Settings = () => {
                     </div>
 
                     <div className="flex justify-end pt-2">
-                        <button type="submit" className="btn-primary">
+                        <button 
+                            type="submit" 
+                            disabled={shopName.length > 300 || address.length > 300}
+                            className="btn-primary"
+                        >
                             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>save</span>
                             {t('common.save')} Changes
                         </button>

@@ -24,7 +24,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 // ─── Monthly Revenue Bar Chart ───────────────────────────────────────────────
 export const MonthlyRevenueChart = ({ data }) => {
     // Fallback if data is not provided or empty
-    const chartData = data && data.length > 0 ? data : [
+    const chartData = Array.isArray(data) && data.length > 0 ? data : [
         { month: 'Q1', revenue: 0 },
         { month: 'Q2', revenue: 0 }
     ];
@@ -54,7 +54,7 @@ export const MonthlyRevenueChart = ({ data }) => {
 
 // ─── Weekly Revenue Line/Area Chart ───────────────────────────────────────────
 export const WeeklyRevenueChart = ({ data }) => {
-    const chartData = data && data.length > 0 ? data : [
+    const chartData = Array.isArray(data) && data.length > 0 ? data : [
         { day: 'Mon', revenue: 0 },
         { day: 'Tue', revenue: 0 }
     ];
@@ -85,7 +85,7 @@ export const WeeklyRevenueChart = ({ data }) => {
 const PIE_COLORS = ['#2f7f33', '#4ade80', '#fb923c', '#60a5fa', '#a78bfa', '#f472b6'];
 
 export const TopProductsChart = ({ data }) => {
-    const chartData = data || [
+    const chartData = Array.isArray(data) && data.length > 0 ? data : [
         { name: 'Urea', value: 35 },
         { name: 'NPK Complex', value: 28 },
         { name: 'DAP', value: 20 },
@@ -123,7 +123,7 @@ export const TopProductsChart = ({ data }) => {
 
 // ─── Monthly Sales Line Chart (for Reports) ──────────────────────────────────
 export const MonthlySalesLineChart = ({ data }) => {
-    const chartData = data || [
+    const chartData = Array.isArray(data) && data.length > 0 ? data : [
         { month: 'Jan', sales: 82000, credit: 25000 },
         { month: 'Feb', sales: 123000, credit: 42000 },
         { month: 'Mar', sales: 113000, credit: 38000 },

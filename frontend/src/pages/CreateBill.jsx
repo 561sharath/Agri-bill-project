@@ -1,139 +1,19 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm, useFieldArray, useWatch } from 'react-hook-form';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { pdf } from '@react-pdf/renderer';
 import toast from 'react-hot-toast';
 import { farmersAPI, productsAPI, billsAPI } from '../services/api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { getShopDetails } from '../utils/shopStorage';
 import { BillPDFDocument } from '../components/BillPDFDocument';
+import SearchableSelect from '../components/SearchableSelect';
 
-const GST_RATES = [5, 12, 18];
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   ProductRow — isolated so only one row re-renders when it changes
-───────────────────────────────────────────────────────────────────────────── */
-const ProductRow = ({ index, field, products, register, setValue, watch, remove, disabled, isLast }) => {
-    const productId = watch(`items.${index}.productId`);
-    const quantity  = watch(`items.${index}.quantity`);
-    const price     = watch(`items.${index}.price`);
-    const total     = watch(`items.${index}.total`);
-
-    // When product selection changes, clear and fill price
-    const handleProductChange = (e) => {
-        const newId = e.target.value;
-        // Always reset price / qty / total first
-        setValue(`items.${index}.productId`, newId);
-        setValue(`items.${index}.price`, 0);
-        setValue(`items.${index}.quantity`, 1);
-        setValue(`items.${index}.total`, 0);
-
-        if (!newId) return;
-
-        const product = products.find(p => String(p._id) === newId);
-        if (product) {
-            setValue(`items.${index}.price`, product.price);
-            setValue(`items.${index}.total`, product.price);
-        }
-    };
-
-    const handleQtyChange = (e) => {
-        const val = e.target.value;
-        const qty = val === '' ? '' : Math.max(0, parseInt(val) || 0);
-        const currentPrice = Number(price) || 0;
-        setValue(`items.${index}.quantity`, qty);
-        setValue(`items.${index}.total`, qty === '' ? 0 : parseFloat((currentPrice * qty).toFixed(2)));
-
-        // Stock check
-        if (productId && qty !== '') {
-            const product = products.find(p => String(p._id) === productId);
-            if (product && qty > product.stock) {
-                toast.error(`Only ${product.stock} units of "${product.name}" in stock`, { id: `stock-${index}` });
-            }
-        }
-    };
-
-    const selectedProduct = products.find(p => String(p._id) === productId);
-
-    return (
-        <tr className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
-            <td className="px-3 py-2">
-                <select
-                    value={productId || ''}
-                    onChange={handleProductChange}
-                    disabled={disabled}
-                    className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
-                >
-                    <option value="">Select product...</option>
-                    {products.map(p => (
-                        <option key={p._id} value={p._id} disabled={p.stock === 0}>
-                            {p.name} — ₹{p.price} {p.stock === 0 ? '(Out of stock)' : `(${p.stock} left)`}
-                        </option>
-                    ))}
-                </select>
-                {selectedProduct && (
-                    <p className="text-[10px] text-slate-400 mt-0.5 pl-1">
-                        Stock: {selectedProduct.stock} units
-                    </p>
-                )}
-            </td>
-            <td className="px-3 py-2 w-20">
-                <input
-                    type="number"
-                    min={0}
-                    value={quantity !== undefined ? quantity : 1}
-                    onChange={handleQtyChange}
-                    disabled={disabled || !productId}
-                    className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-40 text-center"
-                />
-            </td>
-            <td className="px-3 py-2 w-28">
-                <input
-                    type="text"
-                    value={price ? `₹${price}` : '—'}
-                    readOnly
-                    className="w-full text-xs rounded-lg border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-2 py-1.5 text-slate-500 cursor-not-allowed"
-                />
-            </td>
-            <td className="px-3 py-2 w-28 text-right">
-                <span className={`text-sm font-bold ${total > 0 ? 'text-slate-700 dark:text-slate-200' : 'text-slate-300'}`}>
-                    {total > 0 ? formatCurrency(total) : '—'}
-                </span>
-            </td>
-            <td className="px-3 py-2 w-8 text-center">
-                <button
-                    type="button"
-                    onClick={() => remove(index)}
-                    disabled={disabled || isLast}
-                    className="p-1 rounded text-slate-300 hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
-                    title="Remove row"
-                >
-                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
-                </button>
-            </td>
-        </tr>
-    );
-};
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Main CreateBill Component
-───────────────────────────────────────────────────────────────────────────── */
-
-const transliterateToKannada = async (text) => {
-    if (!text || !text.trim()) return '';
-    try {
-        const res = await fetch(`https://inputtools.google.com/request?text=${encodeURIComponent(text.trim())}&itc=kn-t-i0-und&num=1`);
-        const json = await res.json();
-        if (json[0] === 'SUCCESS' && json[1][0][1][0]) {
-            return json[1][0][1][0];
-        }
-    } catch { return ''; }
-    return '';
-};
 
 const CreateBill = () => {
     const navigate = useNavigate();
     const [products, setProducts] = useState([]);
+    const [showAddFarmerModal, setShowAddFarmerModal] = useState(false);
     const [farmerSearch, setFarmerSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [selectedFarmer, setSelectedFarmer] = useState(null);
@@ -366,14 +246,15 @@ const CreateBill = () => {
         } finally {
             setSubmitting(false);
         }
-    }, [reviewData, selectedFarmer, isNewFarmer, farmerSearch, grandTotal, sendToWhatsApp, gstEnabled, gstPercent, subtotal, gstAmount, interestAmount, kannadaName, products]);
+    }, [reviewData, products, selectedFarmer, isNewFarmer, farmerSearch, subtotal, grandTotal, gstEnabled, gstPercent, gstAmount, interestAmount, kannadaName]);
 
-    // ── PDF helpers (use local bill object — no extra API call) ──────────────
-    const buildPDFBlob = useCallback(async () => {
-        if (!generatedBill) throw new Error('No bill available');
+    // Generate bill PDF with react-pdf (used for both view and download); use shop details from Settings
+    const generateBillPDFBlob = async () => {
+        const { data: bill } = await billsAPI.getById(generatedBillId);
+        if (!bill) throw new Error('Bill not found');
         const shopDetails = getShopDetails();
-        return await pdf(<BillPDFDocument bill={generatedBill} shopDetails={shopDetails} />).toBlob();
-    }, [generatedBill]);
+        return await pdf(<BillPDFDocument bill={bill} shopDetails={shopDetails} />).toBlob();
+    };
 
     const handleViewPDF = useCallback(async () => {
         setPdfLoading(true);
@@ -460,9 +341,19 @@ const CreateBill = () => {
 
                         {/* Farmer Card */}
                         <div className="card p-5">
-                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
-                                <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
-                                Select Farmer
+                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center justify-between">
+                                <span className="flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
+                                    Select Farmer
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddFarmerModal(true)}
+                                    className="btn-primary py-1.5 px-3 text-xs flex items-center gap-1 cursor-pointer"
+                                >
+                                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>person_add</span>
+                                    Add Farmer
+                                </button>
                             </h3>
 
                             {selectedFarmer ? (
@@ -564,31 +455,38 @@ const CreateBill = () => {
                                             </button>
                                         )}
                                     </div>
-                                    {farmerSearch.length >= 2 && searchResults.length > 0 && (
-                                        <div className="mt-1 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-sm">
-                                            {searchResults.map(f => (
-                                                <button key={f._id} type="button"
-                                                    onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
-                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0 cursor-pointer">
-                                                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                                                        {f.name?.[0] || '?'}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium">{f.name}</p>
-                                                        <p className="text-xs text-slate-500">{f.village} · {f.mobile}
-                                                            {f.creditBalance > 0 && <span className="ml-2 text-red-500 font-semibold">Due: {formatCurrency(f.creditBalance)}</span>}
-                                                        </p>
-                                                    </div>
-                                                </button>
-                                            ))}
+                                    {farmerSearch.length > 2 && (
+                                        <div className="mt-2 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-sm">
+                                {searchResults.length > 0 ? (
+                                    searchResults.map(f => (
+                                        <button
+                                            key={f._id}
+                                            type="button"
+                                            onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
+                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                        >
+                                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                                                {f.name[0]}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium">{f.name}</p>
+                                                <p className="text-xs text-slate-500">{f.village} · {f.mobile}</p>
+                                            </div>
+                                        </button>
+                                    ))
+                                ) : (
+                                    <div className="p-3 text-center text-xs text-slate-500">
+                                        No farmer found. Keep typing mobile number to add as new.
+                                    </div>
+                                )}
+                                {farmerSearch.length >= 2 && searchResults.length === 0 && (
+                                    <p className="text-xs text-slate-400 mt-2 px-1">
+                                        {/^\d{10}$/.test(farmerSearch)
+                                            ? '✅ 10-digit number detected — new farmer mode activated'
+                                            : 'No farmers found. Try a different name or enter a 10-digit mobile.'}
+                                    </p>
+                                )}
                                         </div>
-                                    )}
-                                    {farmerSearch.length >= 2 && searchResults.length === 0 && (
-                                        <p className="text-xs text-slate-400 mt-2 px-1">
-                                            {/^\d{10}$/.test(farmerSearch)
-                                                ? '✅ 10-digit number detected — new farmer mode activated'
-                                                : 'No farmers found. Try a different name or enter a 10-digit mobile.'}
-                                        </p>
                                     )}
                                 </div>
                             )}
@@ -608,38 +506,75 @@ const CreateBill = () => {
                                     Add Row
                                 </button>
                             </div>
-
-                            {/* Table with fixed height scroll — only products scroll, not whole page */}
-                            <div className="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
-                                <div className="overflow-auto" style={{ maxHeight: '280px' }}>
-                                    <table className="w-full text-left border-collapse">
-                                        <thead className="sticky top-0 z-10">
-                                            <tr className="bg-slate-100 dark:bg-slate-800">
-                                                <th className="px-3 py-2.5 text-xs font-bold text-slate-500 uppercase">Product</th>
-                                                <th className="px-3 py-2.5 text-xs font-bold text-slate-500 uppercase w-20 text-center">Qty</th>
-                                                <th className="px-3 py-2.5 text-xs font-bold text-slate-500 uppercase w-28">Rate</th>
-                                                <th className="px-3 py-2.5 text-xs font-bold text-slate-500 uppercase w-28 text-right">Total</th>
-                                                <th className="px-3 py-2.5 w-8"></th>
+                            <div className="min-h-0 max-h-[280px] overflow-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-50 dark:bg-slate-800/60">
+                                            <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
+                                            <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase w-20">Qty</th>
+                                            <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase w-28">Price</th>
+                                            <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase w-28 text-right">Total</th>
+                                            <th className="px-3 py-2 w-8"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {fields.map((field, index) => (
+                                            <tr key={field.id} className="border-t border-slate-100 dark:border-slate-800">
+                                                <td className="px-3 py-2">
+                                                    <SearchableSelect
+                                                        products={products}
+                                                        value={watchedItems[index]?.productId}
+                                                        onChange={(productId) => {
+                                                            setValue(`items.${index}.productId`, productId);
+                                                            handleProductChange(index, productId);
+                                                        }}
+                                                        placeholder="Select product..."
+                                                        className="input text-xs py-1.5 w-full"
+                                                    />
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        {...register(`items.${index}.quantity`, { min: 1, valueAsNumber: true })}
+                                                        onBlur={e => {
+                                                            const v = Number(e.target.value);
+                                                            if (!v || v < 1) {
+                                                                setValue(`items.${index}.quantity`, 1);
+                                                                setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
+                                                            }
+                                                        }}
+                                                        onChange={e => { handleQuantityChange(index, Number(e.target.value)); register(`items.${index}.quantity`).onChange(e); }}
+                                                        className="input text-xs py-1.5 w-16"
+                                                    />
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        {...register(`items.${index}.price`)}
+                                                        readOnly
+                                                        className="input text-xs py-1.5 w-24 bg-slate-100 dark:bg-slate-700"
+                                                    />
+                                                </td>
+                                                <td className="px-3 py-2 text-right font-semibold text-sm">
+                                                    {formatCurrency(watchedItems[index]?.total || 0)}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    {fields.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => remove(index)}
+                                                            className="p-1 text-slate-300 hover:text-red-400 transition-colors cursor-pointer"
+                                                        >
+                                                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
+                                                        </button>
+                                                    )}
+                                                </td>
                                             </tr>
-                                        </thead>
-                                        <tbody>
-                                            {fields.map((field, index) => (
-                                                <ProductRow
-                                                    key={field.id}
-                                                    index={index}
-                                                    field={field}
-                                                    products={products}
-                                                    register={register}
-                                                    setValue={setValue}
-                                                    watch={watch}
-                                                    remove={remove}
-                                                    disabled={!!generatedBill}
-                                                    isLast={fields.length === 1}
-                                                />
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
 
@@ -858,7 +793,9 @@ const CreateBill = () => {
                         <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
                             <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
                             <div>
-                                <p className="font-bold text-sm">{isNewFarmer ? `${reviewData.newFarmer?.name} (New)` : selectedFarmer?.name}</p>
+                                <p className="font-bold text-sm">
+                                    {isNewFarmer ? reviewData.newFarmer?.name + ' (New Farmer)' : selectedFarmer?.name}
+                                </p>
                                 <p className="text-xs text-slate-500">{selectedFarmer?.mobile || farmerSearch}</p>
                             </div>
                         </div>
@@ -866,24 +803,24 @@ const CreateBill = () => {
                         {/* Items */}
                         <div className="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
                             <div className="max-h-52 overflow-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
-                                        <tr>
-                                            <th className="px-4 py-2 text-left text-xs font-bold text-slate-500 uppercase">Product</th>
-                                            <th className="px-4 py-2 text-center text-xs font-bold text-slate-500 uppercase">Qty</th>
-                                            <th className="px-4 py-2 text-right text-xs font-bold text-slate-500 uppercase">Rate</th>
-                                            <th className="px-4 py-2 text-right text-xs font-bold text-slate-500 uppercase">Total</th>
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-slate-50 dark:bg-slate-800/60">
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-center">Qty</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Price</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {reviewData.validItems.map((item, idx) => {
-                                            const prod = products.find(p => String(p._id) === String(item.productId));
+                                        {reviewData.items.filter(i => i.productId).map((item, idx) => {
+                                            const prod = products.find(p => p._id === item.productId);
                                             return (
                                                 <tr key={idx}>
-                                                    <td className="px-4 py-2 font-medium">{prod?.name || 'Product'}</td>
-                                                    <td className="px-4 py-2 text-center">{item.quantity}</td>
-                                                    <td className="px-4 py-2 text-right text-slate-500">{formatCurrency(item.price)}</td>
-                                                    <td className="px-4 py-2 text-right font-bold">{formatCurrency(item.total)}</td>
+                                                    <td className="px-4 py-2 text-sm font-medium">{prod?.name || 'Product'}</td>
+                                                    <td className="px-4 py-2 text-sm text-center">{item.quantity}</td>
+                                                    <td className="px-4 py-2 text-sm text-right text-slate-500">₹{Number(item.price).toLocaleString()}</td>
+                                                    <td className="px-4 py-2 text-sm text-right font-bold">₹{Number(item.total).toLocaleString()}</td>
                                                 </tr>
                                             );
                                         })}
@@ -923,6 +860,19 @@ const CreateBill = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {showAddFarmerModal && (
+                <AddFarmerModal
+                    onClose={() => setShowAddFarmerModal(false)}
+                    onSave={(newFarmer) => {
+                        setShowAddFarmerModal(false);
+                        setSelectedFarmer(newFarmer);
+                        setFarmerSearch('');
+                        setIsNewFarmer(false);
+                        setSearchResults([]);
+                    }}
+                />
             )}
         </div>
     );

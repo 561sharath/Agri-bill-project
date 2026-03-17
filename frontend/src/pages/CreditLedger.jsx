@@ -4,11 +4,14 @@ import toast from 'react-hot-toast';
 import { reportsAPI, remindersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
+import useDebounce from '../hooks/useDebounce';
+import TruncatedText from '../components/TruncatedText';
 
 const CreditLedger = () => {
     const navigate = useNavigate();
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebounce(search, 500);
     const [sendingReminderFor, setSendingReminderFor] = useState(null);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -20,14 +23,16 @@ const CreditLedger = () => {
         setLoading(true);
         try {
             const params = { page, limit: 10 };
-            if (search.trim()) params.search = search.trim();
+            if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
             const res = await reportsAPI.getCreditReport(params);
-            setData(res.data.data);
-            setTotalPages(res.data.totalPages);
-            setTotalRecords(res.data.totalRecords);
+            
+            const records = res?.data?.data || [];
+            setData(records);
+            setTotalPages(res?.data?.totalPages || 1);
+            setTotalRecords(res?.data?.totalRecords || 0);
             setSummary({
-                totalOutstanding: res.data.totalOutstanding || 0,
-                count: res.data.totalRecords
+                totalOutstanding: res?.data?.totalOutstanding || 0,
+                count: res?.data?.totalRecords || 0
             });
         } catch {
             toast.error('Failed to fetch credit ledger');
@@ -47,7 +52,7 @@ const CreditLedger = () => {
     }, []);
 
     const handleSendReminder = useCallback(async (farmer) => {
-        if (!farmer.mobile || farmer.mobile.length < 10) {
+        if (!farmer?.mobile || farmer.mobile.length < 10) {
             toast.error('No valid mobile number for this farmer');
             return;
         }
@@ -177,15 +182,19 @@ const CreditLedger = () => {
                                                     <div className="h-9 w-9 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-red-600 text-sm font-bold shrink-0">
                                                         {farmer.name?.[0] || '?'}
                                                     </div>
-                                                    <div>
-                                                        <p className="font-bold text-sm text-slate-800 dark:text-slate-200">{farmer.name}</p>
-                                                        <p className="text-xs text-slate-500 font-mono">{farmer.mobile}</p>
+                                                    <div className="min-w-0">
+                                                        <p className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                                                            <TruncatedText text={farmer?.name || 'Unknown'} />
+                                                        </p>
+                                                        <p className="text-xs text-slate-500 font-mono">{farmer?.mobile || '-'}</p>
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">{farmer.village}</td>
+                                            <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">
+                                                <TruncatedText text={farmer?.village || '-'} />
+                                            </td>
                                             <td className="px-4 py-4 text-right">
-                                                <span className="text-sm font-black text-red-600">{formatCurrency(farmer.creditBalance)}</span>
+                                                <span className="text-sm font-black text-red-600">{formatCurrency(farmer?.creditBalance || 0)}</span>
                                             </td>
                                             <td className="px-4 py-4">{getStatusBadge(farmer.creditBalance)}</td>
                                             <td className="px-4 py-4">
