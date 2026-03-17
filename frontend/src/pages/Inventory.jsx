@@ -5,10 +5,11 @@ import ProductTable from '../components/ProductTable';
 import Pagination from '../components/Pagination';
 import { productsAPI } from '../services/api';
 import useDebounce from '../hooks/useDebounce';
+import TruncatedText from '../components/TruncatedText';
 
 const ProductModal = ({ product, onClose, onSave }) => {
     // If product exists, we show 'Present Stock' (readonly) and use 'updateStock' input
-    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+    const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm({
         defaultValues: product ? {
             name: product.name,
             brand: product.brand,
@@ -16,6 +17,8 @@ const ProductModal = ({ product, onClose, onSave }) => {
             updateStock: '' // Additional stock to add
         } : { name: '', brand: '', price: '', stock: '' }
     });
+
+    const nameValue = watch('name') || '';
 
     const onSubmit = async (data) => {
         try {
@@ -26,7 +29,7 @@ const ProductModal = ({ product, onClose, onSave }) => {
                     toast.error('Update Stock cannot be negative');
                     return;
                 }
-                const newTotalStock = product.stock + additional;
+                const newTotalStock = (product?.stock || 0) + additional;
                 // Prepare update payload
                 const payload = { ...data, stock: newTotalStock };
                 delete payload.updateStock; // unnecessary for the backend endpoint for standard update
@@ -54,13 +57,25 @@ const ProductModal = ({ product, onClose, onSave }) => {
                 </div>
                 <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
                     <div>
-                        <label className="label">Product Name *</label>
+                        <label className="label">
+                            <TruncatedText text="Product Name *" />
+                        </label>
                         <input
-                            {...register('name', { required: 'Name is required', maxLength: 300 })}
-                            className="input w-full"
+                            {...register('name', { 
+                                required: 'Name is required', 
+                                maxLength: { value: 300, message: 'Maximum 300 characters allowed' } 
+                            })}
+                            className={`input w-full ${errors.name ? 'input-invalid' : ''}`}
                             placeholder="e.g. Urea (50kg)"
                         />
-                        {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name.message}</p>}
+                        <div className="flex justify-between items-start mt-1">
+                            {errors.name ? (
+                                <p className="field-error">{errors.name.message}</p>
+                            ) : <div />}
+                            <span className={`char-count ${nameValue.length > 300 ? 'text-red-500' : ''}`}>
+                                {nameValue.length}/300
+                            </span>
+                        </div>
                     </div>
                     <div>
                         <label className="label">Brand</label>

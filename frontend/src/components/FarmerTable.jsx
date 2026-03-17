@@ -3,19 +3,8 @@ import toast from 'react-hot-toast';
 import { farmersAPI, paymentsAPI } from '../services/api';
 import { formatCurrency, formatDate, getInitials, avatarColor } from '../utils/formatCurrency';
 import useDebounce from '../hooks/useDebounce';
-
-// ─── Tooltip wrapper ──────────────────────────────────────────────────────────
-const Tooltip = ({ text, maxLen = 30, children }) => {
-    if (!text || text.length <= maxLen) return children;
-    return (
-        <span className="relative group cursor-default">
-            {children}
-            <span className="absolute bottom-full left-0 mb-1 z-50 w-max max-w-xs bg-slate-800 text-white text-xs rounded-lg px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg whitespace-pre-wrap">
-                {text}
-            </span>
-        </span>
-    );
-};
+import TruncatedText from './TruncatedText';
+import Tooltip from './Tooltip';
 
 // ─── Farmer Details / Transaction Modal ───────────────────────────────────────
 const FarmerDetailsModal = ({ farmerId, onClose }) => {
@@ -210,9 +199,24 @@ const FarmerEditModal = ({ farmer, onClose, onSaved }) => {
                 {!review ? (
                     <div className="flex flex-col gap-4">
                         <div>
-                            <label className="label">Full Name * <span className="text-slate-400 font-normal">(max 50 chars)</span></label>
-                            <input name="name" value={form.name} onChange={handleChange} maxLength={50} className="input" placeholder="Farmer full name" />
-                            <p className="text-xs text-slate-400 mt-1 text-right">{form.name.length}/50</p>
+                            <label className="label">
+                                <TruncatedText text="Full Name *" />
+                            </label>
+                            <input 
+                                name="name" 
+                                value={form.name} 
+                                onChange={handleChange} 
+                                maxLength={300} 
+                                className={`input ${form.name.length > 300 ? 'input-invalid' : ''}`}
+                                placeholder="Farmer full name" 
+                            />
+                            <div className="flex justify-between items-start">
+                                {form.name.length > 300 && <p className="field-error">Maximum 300 characters allowed</p>}
+                                <div />
+                                <span className={`char-count ${form.name.length > 300 ? 'text-red-500' : ''}`}>
+                                    {form.name.length}/300
+                                </span>
+                            </div>
                         </div>
                         <div>
                             <label className="label">Mobile *</label>
@@ -220,7 +224,20 @@ const FarmerEditModal = ({ farmer, onClose, onSaved }) => {
                         </div>
                         <div>
                             <label className="label">Village *</label>
-                            <input name="village" value={form.village} onChange={handleChange} className="input" placeholder="Village name" />
+                            <input 
+                                name="village" 
+                                value={form.village} 
+                                onChange={handleChange} 
+                                className={`input ${form.village.length > 300 ? 'input-invalid' : ''}`}
+                                placeholder="Village name" 
+                            />
+                            <div className="flex justify-between items-start">
+                                {form.village.length > 300 && <p className="field-error">Maximum 300 characters allowed</p>}
+                                <div />
+                                <span className={`char-count ${form.village.length > 300 ? 'text-red-500' : ''}`}>
+                                    {form.village.length}/300
+                                </span>
+                            </div>
                         </div>
                         <div className="flex gap-3 pt-2">
                             <button onClick={onClose} className="btn-outline flex-1">Cancel</button>
@@ -232,6 +249,7 @@ const FarmerEditModal = ({ farmer, onClose, onSaved }) => {
                                     }
                                     setReview(true);
                                 }}
+                                disabled={form.name.length > 300 || form.village.length > 300 || !form.name.trim() || !form.mobile.trim() || !form.village.trim()}
                                 className="btn-primary flex-1"
                             >
                                 Review Changes
@@ -452,20 +470,16 @@ const FarmerTable = ({ farmers = [], loading = false, onDelete, onSearch, onFilt
                                                 <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColor(farmer.name)}`}>
                                                     {getInitials(farmer.name)}
                                                 </div>
-                                                <Tooltip text={farmer.name} maxLen={25}>
-                                                    <button
-                                                        onClick={() => setViewFarmer(farmer._id)}
-                                                        className="font-medium text-sm truncate max-w-[140px] hover:text-primary transition-colors cursor-pointer text-left"
-                                                    >
-                                                        {farmer.name}
-                                                    </button>
-                                                </Tooltip>
+                                                <button
+                                                    onClick={() => setViewFarmer(farmer._id)}
+                                                    className="font-medium text-sm hover:text-primary transition-colors cursor-pointer text-left overflow-hidden"
+                                                >
+                                                    <TruncatedText text={farmer.name} />
+                                                </button>
                                             </div>
                                         </td>
                                         <td className="px-4 py-3 text-sm text-slate-500">
-                                            <Tooltip text={farmer.village} maxLen={18}>
-                                                <span className="truncate max-w-[100px] block">{farmer.village}</span>
-                                            </Tooltip>
+                                            <TruncatedText text={farmer.village} />
                                         </td>
                                         <td className="px-4 py-3 text-sm text-slate-500 font-mono">{farmer.mobile}</td>
                                         {!compact && (

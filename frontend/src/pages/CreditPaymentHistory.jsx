@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { pdf } from '@react-pdf/renderer';
 import { reportsAPI, farmersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
-import { StatementPDFDocument } from '../components/StatementPDFDocument';
+import TruncatedText from '../components/TruncatedText';
 
 const CreditPaymentHistory = () => {
     const [statement, setStatement] = useState([]);
@@ -116,6 +115,11 @@ const CreditPaymentHistory = () => {
         try {
             const res = await reportsAPI.getCreditStatementExport(exportParams());
             const rows = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
+            
+            // Dynamic import to prevent multi-megabyte blocking LCP
+            const { pdf } = await import('@react-pdf/renderer');
+            const { StatementPDFDocument } = await import('../components/StatementPDFDocument');
+            
             const blob = await pdf(<StatementPDFDocument rows={rows} />).toBlob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -165,20 +169,20 @@ const CreditPaymentHistory = () => {
                     {farmerResults.length > 0 && !selectedFarmer && (
                         <ul className="mt-1 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 shadow-lg max-h-48 overflow-y-auto">
                             {farmerResults.map((f) => (
-                                <li
-                                    key={f._id}
-                                    onClick={() => {
-                                        setSelectedFarmer(f);
-                                        setFarmerSearch('');
-                                        setFarmerResults([]);
-                                        setPage(1);
-                                    }}
-                                    className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm"
-                                >
-                                    <span className="font-medium">{f.name}</span>
-                                    <span className="text-slate-500 ml-2">{f.mobile}</span>
-                                    <span className="text-slate-400 ml-2">{f.village}</span>
-                                </li>
+                                    <li
+                                        key={f._id}
+                                        onClick={() => {
+                                            setSelectedFarmer(f);
+                                            setFarmerSearch('');
+                                            setFarmerResults([]);
+                                            setPage(1);
+                                        }}
+                                        className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm flex gap-3 min-w-0"
+                                    >
+                                        <TruncatedText text={f?.name || 'Unknown'} />
+                                        <span className="text-slate-500 shrink-0">{f?.mobile || '-'}</span>
+                                        <TruncatedText text={f?.village || '-'} className="text-slate-400" />
+                                    </li>
                             ))}
                         </ul>
                     )}
@@ -243,8 +247,12 @@ const CreditPaymentHistory = () => {
                                                 {row.type === 'bill' ? 'Bill' : 'Payment'}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3 text-sm font-medium">{row.farmerName || '-'}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 max-w-[180px] truncate">{row.description || '-'}</td>
+                                        <td className="px-4 py-3 text-sm font-medium">
+                                            <TruncatedText text={row?.farmerName || '-'} />
+                                        </td>
+                                        <td className="px-4 py-3 text-xs text-slate-500">
+                                            <TruncatedText text={row?.description || '-'} />
+                                        </td>
                                         <td className="px-4 py-3 text-right font-medium text-red-600">{row.debit ? formatCurrency(row.debit) : '–'}</td>
                                         <td className="px-4 py-3 text-right font-medium text-emerald-600">{row.credit ? formatCurrency(row.credit) : '–'}</td>
                                         <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200">{formatCurrency(row.balance)}</td>

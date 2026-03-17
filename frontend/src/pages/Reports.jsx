@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
+import { Suspense, lazy } from 'react';
 import toast from 'react-hot-toast';
 import { reportsAPI } from '../services/api';
-import { MonthlySalesLineChart, TopProductsChart } from '../components/Charts';
+const MonthlySalesLineChart = lazy(() => import('../components/Charts').then(m => ({ default: m.MonthlySalesLineChart })));
+const TopProductsChart = lazy(() => import('../components/Charts').then(m => ({ default: m.TopProductsChart })));
 import { formatCurrency } from '../utils/formatCurrency';
+import TruncatedText from '../components/TruncatedText';
 
 const Reports = () => {
     const [monthlyData, setMonthlyData] = useState([]);
@@ -16,10 +19,12 @@ const Reports = () => {
                 reportsAPI.getMonthlySales(),
                 reportsAPI.getTopProducts()
             ]);
-            setMonthlyData(salesRes.data);
-            setTopProducts(productsRes.data);
+            setMonthlyData(Array.isArray(salesRes?.data) ? salesRes.data : []);
+            setTopProducts(Array.isArray(productsRes?.data) ? productsRes.data : []);
         } catch (err) {
             toast.error('Failed to load reports');
+            setMonthlyData([]);
+            setTopProducts([]);
         } finally {
             setLoading(false);
         }
@@ -29,9 +34,9 @@ const Reports = () => {
         fetchReports();
     }, []);
 
-    const totalSales = monthlyData.reduce((s, m) => s + m.sales, 0);
-    const totalCredit = monthlyData.reduce((s, m) => s + m.credit, 0);
-    const totalCollected = monthlyData.reduce((s, m) => s + m.payments, 0);
+    const totalSales = (monthlyData || []).reduce((s, m) => s + (m?.sales || 0), 0);
+    const totalCredit = (monthlyData || []).reduce((s, m) => s + (m?.credit || 0), 0);
+    const totalCollected = (monthlyData || []).reduce((s, m) => s + (m?.payments || 0), 0);
 
     const handleExportCSV = async () => {
         try {
@@ -99,27 +104,25 @@ const Reports = () => {
                             <span className="material-symbols-outlined text-emerald-600" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>payments</span>
                         </div>
                         <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase">Cash Collections</p>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Collection</p>
                             <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{formatCurrency(totalCollected)}</p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
+            {/* Charts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Suspense fallback={<div className="h-[300px] animate-pulse bg-slate-100 dark:bg-slate-800 rounded-xl" />}>
                     <MonthlySalesLineChart data={monthlyData} />
-                </div>
-                <div>
                     <TopProductsChart data={topProducts} />
-                </div>
+                </Suspense>
             </div>
 
             {/* Table */}
             <div className="card overflow-hidden">
                 <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <h3 className="font-bold">Monthly Performance Breakdown</h3>
+                    <h3 className="font-bold text-slate-800 dark:text-slate-100">Monthly Performance Breakup</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
@@ -127,25 +130,27 @@ const Reports = () => {
                             <tr className="bg-slate-50 dark:bg-slate-800/60">
                                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Month</th>
                                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Sales</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Credit Given</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Payments</th>
-                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Collection Eff.</th>
+                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Credit</th>
+                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Collected</th>
+                                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Collection Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {monthlyData.length === 0 ? (
+                            {!(monthlyData?.length > 0) ? (
                                 <tr>
                                     <td colSpan={5} className="px-5 py-12 text-center text-slate-400">No data available for the current period</td>
                                 </tr>
                             ) : (
                                 monthlyData.map((row, i) => {
-                                    const collectionPct = row.credit > 0 ? ((row.payments / row.credit) * 100).toFixed(0) : 100;
+                                    const collectionPct = (row?.credit || 0) > 0 ? (((row?.payments || 0) / row.credit) * 100).toFixed(0) : 100;
                                     return (
                                         <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                            <td className="px-5 py-4 font-bold text-sm text-slate-800 dark:text-slate-200">{row.month}</td>
-                                            <td className="px-5 py-4 text-right font-medium text-sm">{formatCurrency(row.sales)}</td>
-                                            <td className="px-5 py-4 text-right text-orange-600 font-bold text-sm">{formatCurrency(row.credit)}</td>
-                                            <td className="px-5 py-4 text-right text-emerald-600 font-bold text-sm">{formatCurrency(row.payments)}</td>
+                                            <td className="px-5 py-4 font-bold text-sm text-slate-800 dark:text-slate-200">
+                                                <TruncatedText text={row?.month || 'Unknown'} />
+                                            </td>
+                                            <td className="px-5 py-4 text-right font-medium text-sm">{formatCurrency(row?.sales || 0)}</td>
+                                            <td className="px-5 py-4 text-right text-orange-600 font-bold text-sm">{formatCurrency(row?.credit || 0)}</td>
+                                            <td className="px-5 py-4 text-right text-emerald-600 font-bold text-sm">{formatCurrency(row?.payments || 0)}</td>
                                             <td className="px-5 py-4">
                                                 <div className="flex items-center justify-center gap-3">
                                                     <div className="flex-1 max-w-[100px] h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">

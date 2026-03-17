@@ -6,6 +6,7 @@ import { paymentsAPI, farmersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import useDebounce from '../hooks/useDebounce';
 import Pagination from '../components/Pagination';
+import TruncatedText from '../components/TruncatedText';
 
 // ─── Debounced Farmer Search Dropdown ─────────────────────────────────────────
 const FarmerSearchSelect = ({ onSelect, selectedFarmer, onClear }) => {
@@ -33,8 +34,10 @@ const FarmerSearchSelect = ({ onSelect, selectedFarmer, onClear }) => {
         return (
             <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-xl">
                 <div>
-                    <p className="font-bold text-sm">{selectedFarmer.name}</p>
-                    <p className="text-xs text-slate-500">{selectedFarmer.mobile}</p>
+                    <p className="font-bold text-sm">
+                        <TruncatedText text={selectedFarmer?.name || 'Unknown'} />
+                    </p>
+                    <p className="text-xs text-slate-500">{selectedFarmer?.mobile || '-'}</p>
                 </div>
                 <button type="button" onClick={onClear} className="text-slate-400 hover:text-red-500 cursor-pointer">
                     <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
@@ -74,9 +77,11 @@ const FarmerSearchSelect = ({ onSelect, selectedFarmer, onClear }) => {
                                 onClick={() => { onSelect(f); setQuery(''); setOpen(false); }}
                                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-primary/5 transition-colors text-left border-b border-slate-100 dark:border-slate-700 last:border-0 cursor-pointer"
                             >
-                                <div>
-                                    <p className="text-sm font-medium">{f.name}</p>
-                                    <p className="text-xs text-slate-500">{f.mobile} · Due: {formatCurrency(f.creditBalance)}</p>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium">
+                                        <TruncatedText text={f?.name || 'Unknown'} />
+                                    </p>
+                                    <p className="text-xs text-slate-500">{f?.mobile || '-'} · Due: {formatCurrency(f?.creditBalance || 0)}</p>
                                 </div>
                             </button>
                         ))
@@ -92,6 +97,7 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
     const [selectedFarmer, setSelectedFarmer] = useState(initialFarmer);
     const [sendWhatsApp, setSendWhatsApp] = useState(true);
     const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm();
+    const notesValue = watch('notes') || '';
 
     const onSubmit = async (data) => {
         if (!selectedFarmer) { toast.error('Please select a farmer'); return; }
@@ -127,7 +133,7 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
                     {selectedFarmer && (
                         <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
                             <p className="text-xs text-red-600 dark:text-red-400 font-bold">
-                                Outstanding Balance: {formatCurrency(selectedFarmer.creditBalance)}
+                                Outstanding Balance: {formatCurrency(selectedFarmer?.creditBalance || 0)}
                             </p>
                         </div>
                     )}
@@ -140,11 +146,12 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
                                 {...register('amount', {
                                     required: 'Required',
                                     min: { value: 1, message: 'Min ₹1' },
-                                    validate: val => !selectedFarmer || val <= selectedFarmer.creditBalance || 'Exceeds balance'
+                                    validate: val => !selectedFarmer || val <= (selectedFarmer?.creditBalance || 0) || 'Exceeds balance'
                                 })}
-                                className="input" placeholder="5000"
+                                className={`input ${errors.amount ? 'input-invalid' : ''}`}
+                                placeholder="5000"
                             />
-                            {errors.amount && <p className="text-xs text-red-500 mt-1">{errors.amount.message}</p>}
+                            {errors.amount && <p className="field-error">{errors.amount.message}</p>}
                         </div>
                         <div>
                             <label className="label">Method *</label>
@@ -163,7 +170,19 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
                     </div>
                     <div>
                         <label className="label">Notes</label>
-                        <input {...register('notes')} className="input" placeholder="Optional note..." />
+                        <input 
+                            {...register('notes', { 
+                                maxLength: { value: 300, message: 'Maximum 300 characters allowed' } 
+                            })} 
+                            className={`input ${notesValue.length > 300 ? 'input-invalid' : ''}`}
+                            placeholder="Optional note..." 
+                        />
+                        <div className="flex justify-between items-start mt-1">
+                            {errors.notes ? <p className="field-error">{errors.notes.message}</p> : <div />}
+                            <span className={`char-count ${notesValue.length > 300 ? 'text-red-500' : ''}`}>
+                                {notesValue.length}/300
+                            </span>
+                        </div>
                     </div>
 
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -173,12 +192,16 @@ const RecordPaymentModal = ({ onClose, onSave, initialFarmer = null }) => {
                             onChange={(e) => setSendWhatsApp(e.target.checked)}
                             className="rounded border-slate-300 text-primary focus:ring-primary"
                         />
-                        <span className="text-sm">Send WhatsApp confirmation to farmer (and credit cleared if balance becomes 0)</span>
+                        <span className="text-sm">Send WhatsApp confirmation to farmer</span>
                     </label>
 
                     <div className="flex gap-3 pt-2">
                         <button type="button" onClick={onClose} className="btn-outline flex-1">Cancel</button>
-                        <button type="submit" disabled={isSubmitting} className="btn-primary flex-1">
+                        <button 
+                            type="submit" 
+                            disabled={isSubmitting || notesValue.length > 300} 
+                            className="btn-primary flex-1"
+                        >
                             {isSubmitting ? 'Recording...' : 'Record Payment'}
                         </button>
                     </div>
@@ -274,7 +297,7 @@ const Payments = () => {
         }
     };
 
-    const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
+    const totalCollected = (payments || []).reduce((s, p) => s + (p?.amount || 0), 0);
     const methodBadge = method => {
         const map = { cash: 'badge-success', upi: 'badge-primary', bank: 'badge-info', cheque: 'badge-warning' };
         return <span className={`badge ${map[method] || 'badge-info'} capitalize`}>{method}</span>;

@@ -53,20 +53,20 @@ const AppLayout = () => {
     }, [location.pathname]);
 
     return (
-        <div className="flex h-screen overflow-hidden bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display transition-colors">
+        <div className="flex h-[100dvh] w-full overflow-hidden bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display transition-colors">
             {mobileMenuOpen && (
                 <div
-                    className="fixed inset-0 bg-black/50 z-40 lg:hidden lg:pointer-events-none animate-fade-in"
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden animate-fade-in"
                     onClick={() => setMobileMenuOpen(false)}
                 />
             )}
 
-            <div className={`
-        fixed inset-y-0 left-0 z-50 lg:relative lg:z-auto transition-transform duration-300 shadow-xl lg:shadow-none
-        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}>
+            <aside className={`
+                fixed inset-y-0 left-0 z-50 lg:relative lg:translate-x-0 transition-transform duration-300 shadow-xl lg:shadow-none bg-white dark:bg-slate-900
+                ${mobileMenuOpen ? 'translate-x-0 w-64' : '-translate-x-full w-0 lg:w-auto'}
+            `}>
                 <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-            </div>
+            </aside>
 
             <main className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <Navbar title={getPageTitle()} onMobileMenuToggle={() => setMobileMenuOpen(true)} />

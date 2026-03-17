@@ -1,21 +1,5 @@
 import { formatCurrency } from '../utils/formatCurrency';
-
-// Reusable tooltip for truncated text
-const TooltipCell = ({ text, maxLen = 30 }) => {
-    if (!text) return <span className="text-slate-400">-</span>;
-    const truncated = text.length > maxLen;
-    return (
-        <span className={`relative group ${truncated ? 'cursor-default' : ''}`}>
-            <span className="truncate max-w-[220px] block">{truncated ? `${text.slice(0, maxLen)}…` : text}</span>
-            {truncated && (
-                <span className="absolute bottom-full left-0 mb-1 z-50 w-max max-w-xs bg-slate-800 text-white text-xs rounded-lg px-3 py-1.5
-                    opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg whitespace-pre-wrap">
-                    {text}
-                </span>
-            )}
-        </span>
-    );
-};
+import TruncatedText from './TruncatedText';
 
 const ProductTable = ({ products = [], loading = false, onEdit, onDelete, showActions = true }) => {
     if (loading) {
@@ -64,10 +48,12 @@ const ProductTable = ({ products = [], loading = false, onEdit, onDelete, showAc
                                             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                                                 <span className="material-symbols-outlined text-primary" style={{ fontSize: '16px', fontVariationSettings: "'FILL' 1" }}>grass</span>
                                             </div>
-                                            <TooltipCell text={product.name} maxLen={35} />
+                                            <TruncatedText text={product?.name || 'Unknown'} />
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-slate-500"><TooltipCell text={product.brand} maxLen={20} /></td>
+                                    <td className="px-4 py-3 text-sm text-slate-500">
+                                        <TruncatedText text={product?.brand || '-'} />
+                                    </td>
                                     <td className="px-4 py-3 text-right">
                                         <span className="text-sm font-semibold">{formatCurrency(product.price)}</span>
                                     </td>

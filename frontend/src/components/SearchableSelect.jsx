@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import TruncatedText from './TruncatedText';
 
 /**
  * Dropdown that looks like the existing select (same UI) with search inside.
@@ -42,7 +43,7 @@ export default function SearchableSelect({ products = [], value, onChange, class
         setOpen(false);
     };
 
-    const triggerClass = className ? `${className} cursor-pointer flex items-center justify-between` : 'input text-xs py-1.5 w-full cursor-pointer flex items-center justify-between';
+    const triggerClass = className ? `${className} cursor-pointer flex items-center justify-between overflow-hidden gap-2` : 'input text-xs py-1.5 w-full cursor-pointer flex items-center justify-between overflow-hidden gap-2';
 
     return (
         <div ref={wrapperRef} className="relative w-full">
@@ -51,8 +52,10 @@ export default function SearchableSelect({ products = [], value, onChange, class
                 onClick={() => setOpen(!open)}
                 className={`${triggerClass} text-left`}
             >
-                <span className="truncate">{displayText}</span>
-                <span className="material-symbols-outlined text-slate-400 shrink-0 ml-1" style={{ fontSize: '14px' }}>arrow_drop_down</span>
+                <div className="flex-1 min-w-0">
+                    <TruncatedText text={displayText} className="font-medium" />
+                </div>
+                <span className="material-symbols-outlined text-slate-400 shrink-0" style={{ fontSize: '14px' }}>arrow_drop_down</span>
             </button>
             {open && dropdownRect && createPortal(
                 <div
@@ -78,9 +81,9 @@ export default function SearchableSelect({ products = [], value, onChange, class
                                 <li
                                     key={p._id}
                                     onClick={() => handleSelect(p)}
-                                    className="px-3 py-2 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    className="px-3 py-2 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center"
                                 >
-                                    {p.name} (Stock: {p.stock})
+                                    <TruncatedText text={`${p.name} (Stock: ${p.stock})`} />
                                 </li>
                             ))
                         )}
@@ -91,3 +94,4 @@ export default function SearchableSelect({ products = [], value, onChange, class
         </div>
     );
 }
+
