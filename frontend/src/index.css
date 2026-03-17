@@ -11,10 +11,16 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
   }
 
-  body {
-    @apply bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 min-h-screen;
+  body, #root {
+    @apply bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
   }
 
   /* Scrollbar styling */
@@ -134,6 +140,17 @@
   }
   .page-subtitle {
     @apply text-sm text-slate-500 mt-1;
+  }
+
+  /* Form Validation */
+  .field-error {
+    @apply text-xs text-red-500 mt-1 animate-fade-in;
+  }
+  .char-count {
+    @apply text-[10px] text-slate-400 mt-0.5 text-right font-mono flex justify-end;
+  }
+  .input-invalid {
+    @apply border-red-400 focus:ring-red-100 dark:border-red-900/50;
   }
 
   /* Animation classes */

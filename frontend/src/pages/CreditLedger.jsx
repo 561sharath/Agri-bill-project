@@ -5,6 +5,7 @@ import { reportsAPI, remindersAPI } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatCurrency';
 import Pagination from '../components/Pagination';
 import useDebounce from '../hooks/useDebounce';
+import TruncatedText from '../components/TruncatedText';
 
 const CreditLedger = () => {
     const navigate = useNavigate();
@@ -24,12 +25,14 @@ const CreditLedger = () => {
             const params = { page, limit: 10 };
             if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
             const res = await reportsAPI.getCreditReport(params);
-            setData(res.data.data);
-            setTotalPages(res.data.totalPages);
-            setTotalRecords(res.data.totalRecords);
+            
+            const records = res?.data?.data || [];
+            setData(records);
+            setTotalPages(res?.data?.totalPages || 1);
+            setTotalRecords(res?.data?.totalRecords || 0);
             setSummary({
-                totalOutstanding: res.data.totalOutstanding || 0,
-                count: res.data.totalRecords
+                totalOutstanding: res?.data?.totalOutstanding || 0,
+                count: res?.data?.totalRecords || 0
             });
         } catch (err) {
             toast.error('Failed to fetch credit ledger');
@@ -49,7 +52,7 @@ const CreditLedger = () => {
     };
 
     const handleSendReminder = async (farmer) => {
-        if (!farmer.mobile || farmer.mobile.length < 10) {
+        if (!farmer?.mobile || farmer.mobile.length < 10) {
             toast.error('No valid mobile number for this farmer');
             return;
         }
@@ -144,12 +147,16 @@ const CreditLedger = () => {
                                 data.map(farmer => (
                                     <tr key={farmer._id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                                         <td className="px-4 py-4">
-                                            <p className="font-bold text-sm text-slate-800 dark:text-slate-200">{farmer.name}</p>
-                                            <p className="text-xs text-slate-500">{farmer.mobile}</p>
+                                            <p className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                                                <TruncatedText text={farmer?.name || 'Unknown'} />
+                                            </p>
+                                            <p className="text-xs text-slate-500">{farmer?.mobile || '-'}</p>
                                         </td>
-                                        <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">{farmer.village}</td>
+                                        <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">
+                                            <TruncatedText text={farmer?.village || '-'} />
+                                        </td>
                                         <td className="px-4 py-4 text-right">
-                                            <span className="text-sm font-black text-red-600">{formatCurrency(farmer.creditBalance)}</span>
+                                            <span className="text-sm font-black text-red-600">{formatCurrency(farmer?.creditBalance || 0)}</span>
                                         </td>
                                         <td className="px-4 py-4">{getStatusBadge(farmer.creditBalance)}</td>
                                         <td className="px-4 py-4">

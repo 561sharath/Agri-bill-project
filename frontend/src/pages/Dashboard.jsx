@@ -18,7 +18,7 @@ const useDashboardSection = (apiFn) => {
         setError(false);
         try {
             const res = await apiFn();
-            setData(res.data);
+            setData(res?.data || null);
         } catch {
             setError(true);
         } finally {
@@ -55,14 +55,6 @@ const Dashboard = () => {
     const { data: credit, loading: loadingCredit, error: errorCredit } = useDashboardSection(dashboardAPI.getCredit);
     const { data: inventory, loading: loadingInventory, error: errorInventory } = useDashboardSection(dashboardAPI.getInventory);
     const { data: charts, loading: loadingCharts, error: errorCharts } = useDashboardSection(dashboardAPI.getCharts);
-
-    // Provide combined stats for DashboardCards
-    const combinedStats = {
-        todaySales: sales?.todaySales,
-        totalCreditGiven: sales?.totalCreditGiven,
-        totalFarmers: farmers?.totalFarmers,
-        pendingCreditThisMonth: credit?.pendingCreditThisMonth,
-    };
 
     return (
         <div className="p-6 flex flex-col gap-6 animate-fade-in">
@@ -103,17 +95,17 @@ const Dashboard = () => {
                     </div>
                 )}
                 
-                {/* 2. Total Credit Given */}
-                {loadingSales ? <Skeleton className="h-28" /> : errorSales ? <MetricFallback label="Total Credit" /> : (
+                {/* 2. Monthly Revenue */}
+                {loadingSales ? <Skeleton className="h-28" /> : errorSales ? <MetricFallback label="Total Revenue" /> : (
                     <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
-                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-blue-100 dark:bg-blue-900/30 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-blue-50 dark:bg-blue-900/10 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
                         <div className="flex flex-col justify-between relative z-10 w-full">
                             <div className="flex justify-between items-start mb-4">
-                                <div className="h-11 w-11 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                                    <span className="material-symbols-outlined text-blue-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>account_balance_wallet</span>
+                                <div className="h-11 w-11 rounded-xl bg-blue-50 dark:bg-blue-900/10 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-blue-600" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>payments</span>
                                 </div>
                             </div>
-                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Total Credit Given</h3>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Total Rev (This Mnt)</h3>
                             <div className="flex items-end justify-between w-full">
                                 <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
                                     {formatCurrency(sales?.totalCreditGiven || 0)}
@@ -123,17 +115,17 @@ const Dashboard = () => {
                     </div>
                 )}
 
-                {/* 3. Farmers Count */}
-                {loadingFarmers ? <Skeleton className="h-28" /> : errorFarmers ? <MetricFallback label="Farmers Count" /> : (
+                {/* 3. Total Farmers */}
+                {loadingFarmers ? <Skeleton className="h-28" /> : errorFarmers ? <MetricFallback label="Active Farmers" /> : (
                     <div className="card p-5 group flex justify-between relative overflow-hidden h-full">
-                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-emerald-100 dark:bg-emerald-900/30 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
+                        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-emerald-50 dark:bg-emerald-900/10 opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500" />
                         <div className="flex flex-col justify-between relative z-10 w-full">
                             <div className="flex justify-between items-start mb-4">
-                                <div className="h-11 w-11 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                                    <span className="material-symbols-outlined text-emerald-500" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>groups</span>
+                                <div className="h-11 w-11 rounded-xl bg-emerald-50 dark:bg-emerald-900/10 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-emerald-600" style={{ fontSize: '24px', fontVariationSettings: "'FILL' 1" }}>groups</span>
                                 </div>
                             </div>
-                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Farmers Count</h3>
+                            <h3 className="text-slate-500 font-semibold mb-1 truncate">Active Farmers</h3>
                             <div className="flex items-end justify-between w-full">
                                 <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
                                     {farmers?.totalFarmers?.count || 0}
@@ -190,8 +182,8 @@ const Dashboard = () => {
                             </div>
                         ) : (
                             <Suspense fallback={<Skeleton className="h-48 col-span-1 md:col-span-2" />}>
-                                <MonthlyRevenueChart data={charts.monthlyRevenue} />
-                                <WeeklyRevenueChart data={charts.weeklyRevenue} />
+                                <MonthlyRevenueChart data={charts?.monthlyRevenue || []} />
+                                <WeeklyRevenueChart data={charts?.weeklyRevenue || []} />
                             </Suspense>
                         )}
                     </div>
@@ -224,14 +216,14 @@ const Dashboard = () => {
                                         ))
                                     ) : errorCredit ? (
                                         <tr><td colSpan={4} className="px-5 py-6"><MetricFallback label="Pending Ledger" /></td></tr>
-                                    ) : credit?.pendingLedger?.length > 0 ? (
-                                        credit.pendingLedger.map((item, idx) => (
+                                    ) : (credit?.pendingLedger?.length || 0) > 0 ? (
+                                        credit?.pendingLedger?.map((item, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                                <td className="px-5 py-3.5 font-medium text-sm">{item.farmerName}</td>
-                                                <td className="px-5 py-3.5 font-bold text-red-500 text-sm">{formatCurrency(item.amount)}</td>
+                                                <td className="px-5 py-3.5 font-medium text-sm">{item?.farmerName || 'Unknown'}</td>
+                                                <td className="px-5 py-3.5 font-bold text-red-500 text-sm">{formatCurrency(item?.amount || 0)}</td>
                                                 <td className="px-5 py-3.5 text-sm">
-                                                    <span className={`badge ${item.daysPending > 30 ? 'badge-danger' : 'badge-warning'}`}>
-                                                        {item.daysPending} days
+                                                    <span className={`badge ${(item?.daysPending || 0) > 30 ? 'badge-danger' : 'badge-warning'}`}>
+                                                        {item?.daysPending || 0} days
                                                     </span>
                                                 </td>
                                                 <td className="px-5 py-3.5 text-center">
@@ -296,9 +288,9 @@ const Dashboard = () => {
                                 [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12" />)
                             ) : errorInventory ? (
                                 <MetricFallback label="Stock Alerts" />
-                            ) : inventory?.lowStockProducts?.length > 0 ? (
-                                inventory.lowStockProducts.map((item, i) => {
-                                    const isCritical = item.stock <= 5;
+                            ) : (inventory?.lowStockProducts?.length || 0) > 0 ? (
+                                inventory?.lowStockProducts?.map((item, i) => {
+                                    const isCritical = (item?.stock || 0) <= 5;
                                     return (
                                         <div key={i} className="flex items-center gap-3">
                                             <div className={`h-10 w-10 flex items-center justify-center rounded-xl shrink-0
@@ -308,9 +300,9 @@ const Dashboard = () => {
                                                 </span>
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-bold truncate">{item.productName}</p>
+                                                <p className="text-sm font-bold truncate">{item?.productName || 'Unknown Product'}</p>
                                                 <p className="text-xs text-slate-500">
-                                                    {isCritical ? `🔴 Critical: ${item.stock} units` : `🟠 Low: ${item.stock} units`}
+                                                    {isCritical ? `🔴 Critical: ${item?.stock || 0} units` : `🟠 Low: ${item?.stock || 0} units`}
                                                 </p>
                                             </div>
                                             <button

@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
-import { pdf } from '@react-pdf/renderer';
 import toast from 'react-hot-toast';
 import { farmersAPI, productsAPI, billsAPI } from '../services/api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { getShopDetails } from '../utils/shopStorage';
-import { BillPDFDocument } from '../components/BillPDFDocument';
 import SearchableSelect from '../components/SearchableSelect';
+import TruncatedText from '../components/TruncatedText';
 import AddFarmerModal from '../components/AddFarmerModal';
 
 const CreateBill = () => {
@@ -229,11 +228,15 @@ const CreateBill = () => {
         }
     };
 
-    // Generate bill PDF with react-pdf (used for both view and download); use shop details from Settings
     const generateBillPDFBlob = async () => {
         const { data: bill } = await billsAPI.getById(generatedBillId);
         if (!bill) throw new Error('Bill not found');
         const shopDetails = getShopDetails();
+        
+        // Dynamically import heavy PDF engines only on click to prevent 2MB+ blocking LCP
+        const { pdf } = await import('@react-pdf/renderer');
+        const { BillPDFDocument } = await import('../components/BillPDFDocument');
+        
         return await pdf(<BillPDFDocument bill={bill} shopDetails={shopDetails} />).toBlob();
     };
 
@@ -371,11 +374,15 @@ const CreateBill = () => {
                                                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
                                             >
                                                 <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                                                    {f.name[0]}
+                                                    {(f?.name || 'U')[0]}
                                                 </div>
-                                                <div>
-                                                    <p className="text-sm font-medium">{f.name}</p>
-                                                    <p className="text-xs text-slate-500">{f.village} · {f.mobile}</p>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium">
+                                                        <TruncatedText text={f?.name || 'Unknown'} />
+                                                    </p>
+                                                    <p className="text-xs text-slate-500">
+                                                        <TruncatedText text={f?.village || '-'} /> · {f?.mobile || '-'}
+                                                    </p>
                                                 </div>
                                             </button>
                                         ))
@@ -412,8 +419,9 @@ const CreateBill = () => {
                                     Add Row
                                 </button>
                             </div>
-                            <div className="min-h-0 max-h-[280px] overflow-auto">
-                                <table className="w-full text-left border-collapse">
+                            <div className="w-full">
+                                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+                                    <table className="w-full text-left border-collapse min-w-[600px]">
                                     <thead>
                                         <tr className="bg-slate-50 dark:bg-slate-800/60">
                                             <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
@@ -483,6 +491,7 @@ const CreateBill = () => {
                                 </table>
                             </div>
                         </div>
+                    </div>
 
                         {/* Payment type */}
                         <div className="card p-5">
@@ -616,9 +625,9 @@ const CreateBill = () => {
                         {/* Farmer Info */}
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center gap-3">
                             <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
-                            <div>
+                            <div className="min-w-0">
                                 <p className="font-bold text-sm">
-                                    {isNewFarmer ? reviewData.newFarmer?.name + ' (New Farmer)' : selectedFarmer?.name}
+                                    <TruncatedText text={isNewFarmer ? (reviewData?.newFarmer?.name || 'New Farmer') : (selectedFarmer?.name || 'Selected Farmer')} />
                                 </p>
                                 <p className="text-xs text-slate-500">{selectedFarmer?.mobile || farmerSearch}</p>
                             </div>
@@ -637,11 +646,13 @@ const CreateBill = () => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {reviewData.items.filter(i => i.productId).map((item, idx) => {
+                                    {reviewData?.items?.filter(i => i.productId).map((item, idx) => {
                                         const prod = products.find(p => p._id === item.productId);
                                         return (
                                             <tr key={idx}>
-                                                <td className="px-4 py-2 text-sm font-medium">{prod?.name || 'Product'}</td>
+                                                <td className="px-4 py-2 text-sm font-medium">
+                                                    <TruncatedText text={prod?.name || 'Product'} />
+                                                </td>
                                                 <td className="px-4 py-2 text-sm text-center">{item.quantity}</td>
                                                 <td className="px-4 py-2 text-sm text-right text-slate-500">₹{Number(item.price).toLocaleString()}</td>
                                                 <td className="px-4 py-2 text-sm text-right font-bold">₹{Number(item.total).toLocaleString()}</td>
