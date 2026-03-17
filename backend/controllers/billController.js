@@ -23,11 +23,11 @@ function getPublicAppUrl() {
     return raw.trim().replace(/\/$/, '');
 }
 
-// @desc    Create new bill (with stock validation)
+// @desc    Create new bill (with stock validation + GST + interest)
 // @route   POST /api/bills
 // @access  Private
 export const createBill = async (req, res, next) => {
-    const { farmerId, items, totalAmount, paymentType } = req.body;
+    const { farmerId, items, paymentType } = req.body;
 
     if (!items || items.length === 0) {
         return res.status(400).json({ message: 'No bill items provided' });
@@ -42,13 +42,13 @@ export const createBill = async (req, res, next) => {
             return res.status(404).json({ message: 'Farmer not found' });
         }
 
-        // ── Stock Validation Pass ─────────────────────────────
+        // Stock Validation Pass
         const insufficientItems = [];
         for (const item of items) {
             if (!item.productId) continue;
             const product = await Product.findById(item.productId);
             if (!product) {
-                return res.status(404).json({ message: `Product not found` });
+                return res.status(404).json({ message: 'Product not found' });
             }
             if (product.stock < item.quantity) {
                 insufficientItems.push({
@@ -61,23 +61,48 @@ export const createBill = async (req, res, next) => {
 
         if (insufficientItems.length > 0) {
             const msg = insufficientItems
-                .map(i => `"${i.name}" — only ${i.available} units available (requested ${i.requested})`)
+                .map(i => `"${i.name}" - only ${i.available} units available (requested ${i.requested})`)
                 .join(', ');
             return res.status(400).json({ message: `Insufficient stock: ${msg}` });
         }
-        // ─────────────────────────────────────────────────────
+
+        // Compute subtotal, GST and interest server-side
+        const subtotal = items.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+
+        const gstEnabled = !!req.body.gstEnabled;
+        const gstPercent = gstEnabled ? Math.max(0, Math.min(28, Number(req.body.gstPercent) || 0)) : 0;
+        const gstAmount = gstEnabled ? parseFloat((subtotal * gstPercent / 100).toFixed(2)) : 0;
+        const shopGSTIN = req.body.shopGSTIN || '';
+
+        // Interest only relevant for credit bills
+        const interestRate = (paymentType === 'credit') ? Math.max(0, Number(req.body.interestRate) || 0) : 0;
+        const interestAmount = interestRate > 0 ? parseFloat((subtotal * interestRate / 100).toFixed(2)) : 0;
+        const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : undefined;
+
+        // Grand total = subtotal + GST (interest is noted only, not added to payable by default)
+        const computedTotal = parseFloat((subtotal + gstAmount).toFixed(2));
 
         // 1. Create bill
-        const bill = await Bill.create({
+        const billData = {
             farmerId,
             items,
-            totalAmount,
+            subtotal,
+            totalAmount: computedTotal,
             paymentType,
-        });
+            gstEnabled,
+            gstPercent,
+            gstAmount,
+            shopGSTIN,
+            interestRate,
+            interestAmount,
+        };
+        if (dueDate) billData.dueDate = dueDate;
 
-        // 2. Update farmer credit if payment type is credit
+        const bill = await Bill.create(billData);
+
+        // 2. Update farmer credit balance if payment type is credit
         if (paymentType === 'credit') {
-            farmer.creditBalance += Number(totalAmount);
+            farmer.creditBalance += computedTotal;
             await farmer.save();
         }
 
@@ -89,13 +114,13 @@ export const createBill = async (req, res, next) => {
             });
         }
 
-        // 4. Optional: send bill via WhatsApp (PDF must use public HTTPS URL – e.g. ngrok)
+        // 4. Optional: send bill via WhatsApp
         let whatsAppResponse = null;
         if (req.body.sendWhatsApp && farmer.mobile) {
             try {
                 const baseUrl = getPublicAppUrl();
                 if (!isPublicHttpsUrl(baseUrl)) {
-                    throw new Error('WhatsApp requires a public HTTPS URL for the PDF. Set PUBLIC_APP_URL in .env to your ngrok URL (e.g. https://xxxx.ngrok-free.app). Localhost is rejected by WhatsApp.');
+                    throw new Error('WhatsApp requires a public HTTPS URL. Set PUBLIC_APP_URL in .env to your ngrok URL.');
                 }
                 const populatedBill = await Bill.findById(bill._id)
                     .populate('farmerId', 'name mobile village')
@@ -117,7 +142,6 @@ export const createBill = async (req, res, next) => {
                 };
             } catch (waErr) {
                 console.error('WhatsApp send failed:', waErr.message);
-                // still return 201; frontend can show warning if needed
             }
         }
 
@@ -223,7 +247,7 @@ export const sendBillWhatsApp = async (req, res, next) => {
         const baseUrl = getPublicAppUrl();
         if (!isPublicHttpsUrl(baseUrl)) {
             res.status(400).json({
-                message: 'WhatsApp requires a public HTTPS URL for the PDF. Set PUBLIC_APP_URL in backend .env to your ngrok URL (e.g. https://xxxx.ngrok-free.app). Localhost is rejected by WhatsApp.',
+                message: 'WhatsApp requires a public HTTPS URL. Set PUBLIC_APP_URL in .env to your ngrok URL.',
             });
             return;
         }
@@ -254,7 +278,7 @@ export const sendBillWhatsApp = async (req, res, next) => {
         }
         if (msg.includes('Project credentials incomplete') || msg.includes('credentials incomplete')) {
             res.status(503).json({
-                message: 'Chatmitra project setup incomplete. Log in at https://app.chatmitra.com and complete: verify WhatsApp Business number, connect your number, and ensure the project is active.',
+                message: 'Chatmitra project setup incomplete. Log in at https://app.chatmitra.com and complete setup.',
             });
             return;
         }

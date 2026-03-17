@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { pdf } from '@react-pdf/renderer';
 import { reportsAPI, farmersAPI } from '../services/api';
@@ -19,7 +19,7 @@ const CreditPaymentHistory = () => {
     const [selectedFarmer, setSelectedFarmer] = useState(null);
     const [filters, setFilters] = useState({ startDate: '', endDate: '' });
 
-    const fetchStatement = async (p = page) => {
+    const fetchStatement = useCallback(async (p = page) => {
         setLoading(true);
         try {
             const params = { page: p, limit: 30 };
@@ -35,11 +35,11 @@ const CreditPaymentHistory = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, selectedFarmer?._id, filters.startDate, filters.endDate]);
 
     useEffect(() => {
         fetchStatement(page);
-    }, [page, selectedFarmer?._id, filters.startDate, filters.endDate]);
+    }, [fetchStatement]);
 
     useEffect(() => {
         const t = setTimeout(async () => {
@@ -57,42 +57,37 @@ const CreditPaymentHistory = () => {
         return () => clearTimeout(t);
     }, [farmerSearch]);
 
-    const handleFilterChange = (e) => {
+    const handleFilterChange = useCallback((e) => {
         const { name, value } = e.target;
         setFilters(f => ({ ...f, [name]: value }));
         setPage(1);
-    };
+    }, []);
 
-    const handleClearFilters = () => {
+    const handleClearFilters = useCallback(() => {
         setSelectedFarmer(null);
         setFarmerSearch('');
         setFilters({ startDate: '', endDate: '' });
         setPage(1);
-    };
+    }, []);
 
-    const exportParams = () => {
+    const exportParams = useCallback(() => {
         const p = {};
         if (selectedFarmer?._id) p.farmerId = selectedFarmer._id;
         if (filters.startDate) p.startDate = filters.startDate;
         if (filters.endDate) p.endDate = filters.endDate;
         return p;
-    };
+    }, [selectedFarmer, filters]);
 
-    const handleExportCSV = async () => {
+    const handleExportCSV = useCallback(async () => {
         setExportingCsv(true);
         try {
             const res = await reportsAPI.getCreditStatementExport(exportParams());
             const rows = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
-            const header = 'Date,Farmer Name,Transaction Type,Description,Debit (₹),Credit (₹),Balance (₹)\n';
+            const header = 'Date,Farmer Name,Transaction Type,Description,Debit (Rs),Credit (Rs),Balance (Rs)\n';
             const escape = (v) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`);
             const rowToCsv = (r) => [
-                formatDate(r.date),
-                r.farmerName ?? '',
-                r.type ?? '',
-                r.description ?? '',
-                r.debit ?? 0,
-                r.credit ?? 0,
-                r.balance ?? '',
+                formatDate(r.date), r.farmerName ?? '', r.type ?? '',
+                r.description ?? '', r.debit ?? 0, r.credit ?? 0, r.balance ?? '',
             ].map(escape).join(',');
             const csv = header + rows.map(rowToCsv).join('\n');
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -104,14 +99,13 @@ const CreditPaymentHistory = () => {
             URL.revokeObjectURL(url);
             toast.success('CSV downloaded');
         } catch (err) {
-            console.error('CSV export error', err);
             toast.error(err.response?.data?.message || 'Export failed');
         } finally {
             setExportingCsv(false);
         }
-    };
+    }, [exportParams, filters]);
 
-    const handleExportPDF = async () => {
+    const handleExportPDF = useCallback(async () => {
         setExportingPdf(true);
         try {
             const res = await reportsAPI.getCreditStatementExport(exportParams());
@@ -125,143 +119,148 @@ const CreditPaymentHistory = () => {
             URL.revokeObjectURL(url);
             toast.success('PDF downloaded');
         } catch (err) {
-            console.error('PDF export error', err);
             toast.error(err.response?.data?.message || 'Export failed');
         } finally {
             setExportingPdf(false);
         }
+    }, [exportParams, filters]);
+
+    const typeBadge = (type) => {
+        if (type === 'bill') return <span className="badge badge-warning text-xs">Bill</span>;
+        if (type === 'payment') return <span className="badge badge-success text-xs">Payment</span>;
+        if (type === 'interest') return <span className="badge badge-danger text-xs">Interest</span>;
+        return <span className="badge badge-info text-xs capitalize">{type}</span>;
     };
 
     return (
-        <div className="p-6 flex flex-col gap-6 animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 className="page-title">Credit & Payments</h1>
-                <p className="page-subtitle">Full credit statement (bills + payments) like a bank statement. Search by farmer or filter by date.</p>
+        <div className="h-full overflow-y-auto">
+            <div className="p-4 sm:p-6 flex flex-col gap-6 animate-fade-in max-w-7xl mx-auto">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 className="page-title">Credit &amp; Payments</h1>
+                        <p className="page-subtitle">Full credit statement (bills + payments) like a bank ledger. Filter by farmer or date range.</p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                        <button type="button" onClick={handleExportCSV} disabled={exportingCsv} className="btn-outline text-sm">
+                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>table_view</span>
+                            {exportingCsv ? 'Exporting...' : 'CSV'}
+                        </button>
+                        <button type="button" onClick={handleExportPDF} disabled={exportingPdf} className="btn-outline text-sm">
+                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>picture_as_pdf</span>
+                            {exportingPdf ? 'Exporting...' : 'PDF'}
+                        </button>
+                    </div>
                 </div>
-                <div className="flex gap-2">
-                    <button type="button" onClick={handleExportCSV} disabled={exportingCsv} className="btn-outline text-sm">
-                        {exportingCsv ? '...' : 'Download CSV'}
-                    </button>
-                    <button type="button" onClick={handleExportPDF} disabled={exportingPdf} className="btn-outline text-sm">
-                        {exportingPdf ? '...' : 'Download PDF'}
-                    </button>
-                </div>
-            </div>
 
-            <div className="card p-4 flex flex-col sm:flex-row gap-4 flex-wrap items-end">
-                <div className="flex-1 min-w-[200px]">
-                    <label className="label">Search / Select Farmer</label>
-                    <input
-                        type="text"
-                        value={selectedFarmer ? selectedFarmer.name : farmerSearch}
-                        onChange={(e) => {
-                            if (selectedFarmer) setSelectedFarmer(null);
-                            setFarmerSearch(e.target.value);
-                        }}
-                        placeholder="Name or mobile..."
-                        className="input"
-                    />
-                    {farmerResults.length > 0 && !selectedFarmer && (
-                        <ul className="mt-1 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 shadow-lg max-h-48 overflow-y-auto">
-                            {farmerResults.map((f) => (
-                                <li
-                                    key={f._id}
-                                    onClick={() => {
-                                        setSelectedFarmer(f);
-                                        setFarmerSearch('');
-                                        setFarmerResults([]);
-                                        setPage(1);
-                                    }}
-                                    className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm"
-                                >
-                                    <span className="font-medium">{f.name}</span>
-                                    <span className="text-slate-500 ml-2">{f.mobile}</span>
-                                    <span className="text-slate-400 ml-2">{f.village}</span>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                    {selectedFarmer && (
-                        <p className="mt-1 text-xs text-slate-500">
-                            Showing statement for <strong>{selectedFarmer.name}</strong>. Clear filters to see all.
-                        </p>
-                    )}
+                {/* Filters */}
+                <div className="card p-4 flex flex-col sm:flex-row gap-4 flex-wrap items-end">
+                    <div className="flex-1 min-w-[200px] relative">
+                        <label className="label">Filter by Farmer</label>
+                        <input
+                            type="text"
+                            value={selectedFarmer ? selectedFarmer.name : farmerSearch}
+                            onChange={(e) => {
+                                if (selectedFarmer) setSelectedFarmer(null);
+                                setFarmerSearch(e.target.value);
+                            }}
+                            placeholder="Name or mobile..."
+                            className="input"
+                        />
+                        {farmerResults.length > 0 && !selectedFarmer && (
+                            <ul className="absolute top-full mt-1 left-0 right-0 z-20 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 shadow-lg max-h-48 overflow-y-auto">
+                                {farmerResults.map((f) => (
+                                    <li
+                                        key={f._id}
+                                        onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setFarmerResults([]); setPage(1); }}
+                                        className="px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                    >
+                                        <span className="font-medium">{f.name}</span>
+                                        <span className="text-slate-500 ml-2 text-xs">{f.mobile}</span>
+                                        <span className="text-slate-400 ml-2 text-xs">{f.village}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {selectedFarmer && (
+                            <p className="mt-1 text-xs text-slate-500">
+                                Filtered: <strong>{selectedFarmer.name}</strong>
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex-1 min-w-[140px]">
+                        <label className="label">Start Date</label>
+                        <input type="date" name="startDate" value={filters.startDate} onChange={handleFilterChange} className="input" />
+                    </div>
+                    <div className="flex-1 min-w-[140px]">
+                        <label className="label">End Date</label>
+                        <input type="date" name="endDate" value={filters.endDate} onChange={handleFilterChange} className="input" min={filters.startDate} />
+                    </div>
+                    <button type="button" onClick={handleClearFilters} className="btn-outline text-sm shrink-0">
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>filter_alt_off</span>
+                        Clear
+                    </button>
                 </div>
-                <div className="flex-1 min-w-[140px]">
-                    <label className="label">Start Date</label>
-                    <input type="date" name="startDate" value={filters.startDate} onChange={handleFilterChange} className="input" />
-                </div>
-                <div className="flex-1 min-w-[140px]">
-                    <label className="label">End Date</label>
-                    <input type="date" name="endDate" value={filters.endDate} onChange={handleFilterChange} className="input" min={filters.startDate} />
-                </div>
-                <button type="button" onClick={handleClearFilters} className="btn-outline text-sm">
-                    Clear filters
-                </button>
-            </div>
 
-            <div className="card overflow-hidden flex flex-col min-h-0">
-                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-                    <h3 className="font-bold">Credit Statement (Bills + Payments)</h3>
-                    <span className="text-xs text-slate-400">{totalRecords} transactions</span>
-                </div>
-                <div className="min-h-0 max-h-[50vh] overflow-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-slate-50 dark:bg-slate-800/60">
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Date</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Type</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Farmer</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Description</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Debit (₹)</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Credit (₹)</th>
-                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Balance (₹)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {loading ? (
-                                [...Array(5)].map((_, i) => (
-                                    <tr key={i} className="animate-pulse">
-                                        <td colSpan={7} className="px-4 py-4"><div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" /></td>
-                                    </tr>
-                                ))
-                            ) : statement.length === 0 ? (
-                                <tr>
-                                    <td colSpan={7} className="px-4 py-12 text-center">
-                                        <span className="material-symbols-outlined block text-4xl mb-3 text-slate-300">account_balance</span>
-                                        <p className="text-slate-400 text-sm">No transactions in this period</p>
-                                        <p className="text-slate-300 text-xs mt-1">Select a farmer or adjust date range</p>
-                                    </td>
+                {/* Table Card */}
+                <div className="card overflow-hidden flex flex-col">
+                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+                        <h3 className="font-bold">Credit Statement — Bills &amp; Payments</h3>
+                        <span className="text-xs text-slate-400">{totalRecords} transaction{totalRecords !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50 dark:bg-slate-800/60">
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Date</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Type</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Farmer</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Description</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Debit (Rs)</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Credit (Rs)</th>
+                                    <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Balance (Rs)</th>
                                 </tr>
-                            ) : (
-                                statement.map((row, idx) => (
-                                    <tr key={`${row.type}-${row.ref}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{formatDate(row.date)}</td>
-                                        <td className="px-4 py-3">
-                                            <span className={`badge ${row.type === 'bill' ? 'badge-warning' : 'badge-success'}`}>
-                                                {row.type === 'bill' ? 'Bill' : 'Payment'}
-                                            </span>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {loading ? (
+                                    [...Array(5)].map((_, i) => (
+                                        <tr key={i} className="animate-pulse">
+                                            <td colSpan={7} className="px-4 py-4"><div className="h-4 bg-slate-100 dark:bg-slate-800 rounded" /></td>
+                                        </tr>
+                                    ))
+                                ) : statement.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={7} className="px-4 py-16 text-center">
+                                            <span className="material-symbols-outlined block text-5xl mb-3 text-slate-200">account_balance</span>
+                                            <p className="text-slate-400 text-sm">No transactions in this period</p>
+                                            <p className="text-slate-300 text-xs mt-1">Select a farmer or adjust date range</p>
                                         </td>
-                                        <td className="px-4 py-3 text-sm font-medium">{row.farmerName || '-'}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 max-w-[180px] truncate">{row.description || '-'}</td>
-                                        <td className="px-4 py-3 text-right font-medium text-red-600">{row.debit ? formatCurrency(row.debit) : '–'}</td>
-                                        <td className="px-4 py-3 text-right font-medium text-emerald-600">{row.credit ? formatCurrency(row.credit) : '–'}</td>
-                                        <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200">{formatCurrency(row.balance)}</td>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <div className="p-4 border-t border-slate-100 dark:border-slate-800">
-                    <Pagination
-                        currentPage={page}
-                        totalPages={totalPages}
-                        totalRecords={totalRecords}
-                        onPageChange={setPage}
-                        limit={30}
-                    />
+                                ) : (
+                                    statement.map((row, idx) => (
+                                        <tr key={`${row.type}-${row.ref}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(row.date)}</td>
+                                            <td className="px-4 py-3">{typeBadge(row.type)}</td>
+                                            <td className="px-4 py-3 text-sm font-medium">{row.farmerName || '-'}</td>
+                                            <td className="px-4 py-3 text-xs text-slate-500 max-w-[200px] truncate" title={row.description}>{row.description || '-'}</td>
+                                            <td className="px-4 py-3 text-right font-medium text-red-600">{row.debit ? formatCurrency(row.debit) : '–'}</td>
+                                            <td className="px-4 py-3 text-right font-medium text-emerald-600">{row.credit ? formatCurrency(row.credit) : '–'}</td>
+                                            <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200">{formatCurrency(row.balance)}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="p-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+                        <Pagination
+                            currentPage={page}
+                            totalPages={totalPages}
+                            totalRecords={totalRecords}
+                            onPageChange={setPage}
+                            limit={30}
+                        />
+                    </div>
                 </div>
             </div>
         </div>
