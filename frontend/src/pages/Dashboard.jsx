@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
+import { Suspense, lazy } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MonthlyRevenueChart, WeeklyRevenueChart } from '../components/Charts';
 import { formatCurrency } from '../utils/formatCurrency';
+
+const MonthlyRevenueChart = lazy(() => import('../components/Charts').then(m => ({ default: m.MonthlyRevenueChart })));
+const WeeklyRevenueChart = lazy(() => import('../components/Charts').then(m => ({ default: m.WeeklyRevenueChart })));
 import { dashboardAPI } from '../services/api';
 
 // ─── Individual metric fetcher with isolated error state ─────────────────────
@@ -186,10 +189,10 @@ const Dashboard = () => {
                                 <MetricFallback label="Revenue Charts" />
                             </div>
                         ) : (
-                            <>
+                            <Suspense fallback={<Skeleton className="h-48 col-span-1 md:col-span-2" />}>
                                 <MonthlyRevenueChart data={charts.monthlyRevenue} />
                                 <WeeklyRevenueChart data={charts.weeklyRevenue} />
-                            </>
+                            </Suspense>
                         )}
                     </div>
 

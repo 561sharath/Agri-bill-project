@@ -274,7 +274,7 @@ const Payments = () => {
         }
     };
 
-    const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
+    const totalCollected = (payments || []).reduce((s, p) => s + (p?.amount || 0), 0);
     const methodBadge = method => {
         const map = { cash: 'badge-success', upi: 'badge-primary', bank: 'badge-info', cheque: 'badge-warning' };
         return <span className={`badge ${map[method] || 'badge-info'} capitalize`}>{method}</span>;

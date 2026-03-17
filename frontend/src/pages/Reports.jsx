@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { Suspense, lazy } from 'react';
 import toast from 'react-hot-toast';
 import { reportsAPI } from '../services/api';
-import { MonthlySalesLineChart, TopProductsChart } from '../components/Charts';
+const MonthlySalesLineChart = lazy(() => import('../components/Charts').then(m => ({ default: m.MonthlySalesLineChart })));
+const TopProductsChart = lazy(() => import('../components/Charts').then(m => ({ default: m.TopProductsChart })));
 import { formatCurrency } from '../utils/formatCurrency';
 
 const Reports = () => {
@@ -16,8 +18,8 @@ const Reports = () => {
                 reportsAPI.getMonthlySales(),
                 reportsAPI.getTopProducts()
             ]);
-            setMonthlyData(salesRes.data);
-            setTopProducts(productsRes.data);
+            setMonthlyData(Array.isArray(salesRes.data) ? salesRes.data : []);
+            setTopProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
         } catch (err) {
             toast.error('Failed to load reports');
         } finally {
@@ -29,9 +31,9 @@ const Reports = () => {
         fetchReports();
     }, []);
 
-    const totalSales = monthlyData.reduce((s, m) => s + m.sales, 0);
-    const totalCredit = monthlyData.reduce((s, m) => s + m.credit, 0);
-    const totalCollected = monthlyData.reduce((s, m) => s + m.payments, 0);
+    const totalSales = (monthlyData || []).reduce((s, m) => s + (m.sales || 0), 0);
+    const totalCredit = (monthlyData || []).reduce((s, m) => s + (m.credit || 0), 0);
+    const totalCollected = (monthlyData || []).reduce((s, m) => s + (m.payments || 0), 0);
 
     const handleExportCSV = async () => {
         try {
@@ -109,10 +111,14 @@ const Reports = () => {
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2">
-                    <MonthlySalesLineChart data={monthlyData} />
+                    <Suspense fallback={<div className="h-60 bg-slate-100 dark:bg-slate-800 animate-pulse rounded-xl" />}>
+                        <MonthlySalesLineChart data={monthlyData} />
+                    </Suspense>
                 </div>
                 <div>
-                    <TopProductsChart data={topProducts} />
+                    <Suspense fallback={<div className="h-60 bg-slate-100 dark:bg-slate-800 animate-pulse rounded-xl" />}>
+                        <TopProductsChart data={topProducts} />
+                    </Suspense>
                 </div>
             </div>
 
@@ -133,7 +139,7 @@ const Reports = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {monthlyData.length === 0 ? (
+                            {!(monthlyData?.length > 0) ? (
                                 <tr>
                                     <td colSpan={5} className="px-5 py-12 text-center text-slate-400">No data available for the current period</td>
                                 </tr>
