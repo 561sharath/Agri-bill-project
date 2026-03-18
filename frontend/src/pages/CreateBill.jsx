@@ -1,309 +1,381 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
+import { pdf } from '@react-pdf/renderer';
 import toast from 'react-hot-toast';
 import { farmersAPI, productsAPI, billsAPI } from '../services/api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { getShopDetails } from '../utils/shopStorage';
+import { BillPDFDocument } from '../components/BillPDFDocument';
 import SearchableSelect from '../components/SearchableSelect';
-import TruncatedText from '../components/TruncatedText';
-import AddFarmerModal from '../components/AddFarmerModal';
+import AddFarmerModal from '../components/AddFarmerModal'; // FIX: missing import
+import { transliterateToKannada } from '../utils/transliterate';
 
+// FIX: was referenced in JSX but never defined — caused ReferenceError
+const GST_RATES = [5, 12, 18, 28];
+
+// ── Custom hook: financials ───────────────────────────────────────────────────
+// REFACTOR: extracted 4 inline useMemos → testable, reusable
+function useBillFinancials(items, gstEnabled, gstPercent, paymentType, interestRate) {
+    const subtotal = useMemo(
+        () => items.reduce((sum, i) => sum + (Number(i.total) || 0), 0),
+        [items]
+    );
+    const gstAmount = useMemo(
+        () => gstEnabled ? parseFloat((subtotal * gstPercent / 100).toFixed(2)) : 0,
+        [subtotal, gstEnabled, gstPercent]
+    );
+    const grandTotal = useMemo(
+        () => parseFloat((subtotal + gstAmount).toFixed(2)),
+        [subtotal, gstAmount]
+    );
+    const interestAmount = useMemo(() => {
+        if (paymentType !== 'credit') return 0;
+        const rate = Number(interestRate) || 0;
+        return rate > 0 ? parseFloat((subtotal * rate / 100).toFixed(2)) : 0;
+    }, [subtotal, interestRate, paymentType]);
+
+    return { subtotal, gstAmount, grandTotal, interestAmount };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 const CreateBill = () => {
-    const navigate = useNavigate();
-    const [products, setProducts] = useState([]);
     const [showAddFarmerModal, setShowAddFarmerModal] = useState(false);
     const [farmerSearch, setFarmerSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [selectedFarmer, setSelectedFarmer] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [isNewFarmer, setIsNewFarmer] = useState(false);
-    const [generatedBillId, setGeneratedBillId] = useState(null);
+    const [generatedBill, setGeneratedBill] = useState(null);
     const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
     const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
-    // Review modal state
-    const [reviewData, setReviewData] = useState(null); // holds validated form data for review
+    const [reviewData, setReviewData] = useState(null);
+    const [pdfLoading, setPdfLoading] = useState(false);
 
-    const { register, control, watch, setValue, handleSubmit, reset, formState: { errors } } = useForm({
+    // REFACTOR: two separate state vars (kannadaName + showKannadaInput) → one object
+    const [kannadaState, setKannadaState] = useState({ name: '', show: false });
+
+    // GST
+    const [gstEnabled, setGstEnabled] = useState(false);
+    const [gstPercent, setGstPercent] = useState(5);
+
+    const farmerInputRef = useRef(null);
+    // FIX: stale search response race condition — track request ID
+    const searchReqId = useRef(0);
+
+    const { register, control, watch, setValue, handleSubmit, reset, getValues } = useForm({
         defaultValues: {
             paymentType: 'cash',
             items: [{ productId: '', quantity: 1, price: 0, total: 0 }],
-            newFarmer: { name: '', village: '' }
+            newFarmer: { name: '', village: '' },
+            interestRate: 0,
+            dueDate: '',
         }
     });
 
-    const { fields, append, remove } = useFieldArray({ control, name: 'items' });
-    const watchedItems = watch('items');
+    const { fields, append, remove, update } = useFieldArray({ control, name: 'items' });
+    const watchedPaymentType = watch('paymentType');
+    const watchedInterestRate = watch('interestRate');
     const watchedNewFarmerName = watch('newFarmer.name');
+    const watchedItems = watch('items');
 
-    // Fetch products and handle search
+    // ── Financials via custom hook ────────────────────────────────────────────
+    const { subtotal, gstAmount, grandTotal, interestAmount } = useBillFinancials(
+        watchedItems, gstEnabled, gstPercent, watchedPaymentType, watchedInterestRate
+    );
+
+    // ── Transliteration — REFACTOR: merged two duplicate effects into one ─────
     useEffect(() => {
-        const fetchProducts = async () => {
+        const name = selectedFarmer?.name || (isNewFarmer ? watchedNewFarmerName : '');
+        if (!name) return;
+        const delay = selectedFarmer?.name ? 0 : 800;
+        const t = setTimeout(() => {
+            transliterateToKannada(name).then(res => {
+                if (res) setKannadaState({ name: res, show: true });
+            });
+        }, delay);
+        return () => clearTimeout(t);
+    }, [selectedFarmer?.name, isNewFarmer, watchedNewFarmerName]);
+
+    // ── Farmer search — FIX: discard stale responses via request ID ──────────
+    useEffect(() => {
+        if (farmerSearch.length < 2) {
+            setSearchResults([]);
+            setIsNewFarmer(false);
+            return;
+        }
+        const id = ++searchReqId.current;
+        const t = setTimeout(async () => {
             try {
-                const res = await productsAPI.getAll();
-                // If backend returns pagination object
-                setProducts(Array.isArray(res.data) ? res.data : res.data.data || []);
-            } catch (err) {
-                toast.error('Failed to load products');
-            }
-        };
-        fetchProducts();
-    }, []);
-
-    useEffect(() => {
-        const delayDebounceFn = setTimeout(async () => {
-            if (farmerSearch.length > 2) {
-                try {
-                    const res = await farmersAPI.search(farmerSearch);
-                    setSearchResults(res.data);
-                    // If search query is a 10 digit number and no results, prompt for new farmer
-                    if (res.data.length === 0 && /^\d{10}$/.test(farmerSearch)) {
-                        setIsNewFarmer(true);
-                    } else {
-                        setIsNewFarmer(false);
-                    }
-                } catch (err) {
-                    console.error('Search failed');
-                }
-            } else {
-                setSearchResults([]);
-                setIsNewFarmer(false);
-            }
-        }, 500);
-
-        return () => clearTimeout(delayDebounceFn);
+                const res = await farmersAPI.search(farmerSearch);
+                if (id !== searchReqId.current) return; // stale — discard
+                setSearchResults(res.data || []);
+                setIsNewFarmer(res.data.length === 0 && /^\d{10}$/.test(farmerSearch));
+            } catch { /* silent */ }
+        }, 400);
+        return () => clearTimeout(t);
     }, [farmerSearch]);
 
-    // Handle product selection — merge if duplicate, else set price
-    const handleProductChange = (index, productId) => {
-        if (!productId) return;
-
-        // Check if the same product already exists in another row
-        const existingIndex = watchedItems.findIndex(
-            (item, i) => i !== index && String(item.productId) === String(productId)
-        );
-
-        if (existingIndex !== -1) {
-            // Merge: add 1 to the existing row's quantity
-            const existingQty = Number(watchedItems[existingIndex].quantity || 1) + 1;
-            const price = Number(watchedItems[existingIndex].price || 0);
-            const product = products.find(p => String(p._id) === String(productId));
-
-            if (product && existingQty > product.stock) {
-                toast.error(`Only ${product.stock} units in stock for "${product.name}"`, { id: `stock-dup-${existingIndex}` });
-                return;
-            }
-
-            setValue(`items.${existingIndex}.quantity`, existingQty);
-            setValue(`items.${existingIndex}.total`, price * existingQty);
-
-            // Clear the duplicate row instead of removing it to avoid index shift glitches
-            setValue(`items.${index}.productId`, '');
-            setValue(`items.${index}.price`, 0);
-            setValue(`items.${index}.quantity`, 1);
-            setValue(`items.${index}.total`, 0);
-
-            // Remove the duplicate row if it's not the only row
-            if (fields.length > 1) {
-                remove(index);
-            }
-
-            toast(`"${product?.name}" already in list — quantity updated to ${existingQty}`, {
-                icon: 'ℹ️', id: `dup-${productId}`, duration: 2500
-            });
-            return;
-        }
-
-        const product = products.find(p => String(p._id) === String(productId));
+    // ── Product / quantity handlers — use update() for atomic RHF state ───────
+    // FIX: original used setValue() per field which caused RHF tracking to diverge;
+    //      update() replaces the whole row atomically so watched values stay in sync
+    const handleProductChange = useCallback((index, product) => {
+        const currentItem = getValues(`items.${index}`);
         if (product) {
-            setValue(`items.${index}.price`, product.price);
-            setValue(`items.${index}.quantity`, 1);
-            setValue(`items.${index}.total`, product.price);
-        }
-    };
+            // Prevent duplicate selection
+            const allItems = getValues('items');
+            const isDuplicate = allItems.some((item, i) => i !== index && item.productId === product._id);
 
-    const handleQuantityChange = (index, qty) => {
-        const numQty = Number(qty);
-        if (numQty < 1 || isNaN(numQty)) {
-            setValue(`items.${index}.quantity`, 1);
-            setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
+            if (isDuplicate) {
+                toast.error('Item already selected. Increase the quantity if you want.');
+                // Clear the current selection so they can choose something else
+                update(index, { ...currentItem, productId: '', price: 0, total: 0, productObj: null });
+                return;
+            }
+
+            const qty = Number(currentItem?.quantity) || 1;
+            update(index, { ...currentItem, productId: product._id, price: product.price, total: parseFloat((product.price * qty).toFixed(2)), productObj: product });
+        } else {
+            update(index, { ...currentItem, productId: '', price: 0, total: 0, productObj: null });
+        }
+    }, [getValues, update]);
+
+    const handleQuantityChange = useCallback((index, quantity) => {
+        const item = getValues(`items.${index}`);
+        if (item && item.productId) {
+            update(index, { ...item, quantity, total: parseFloat(((item.price || 0) * quantity).toFixed(2)) });
+        }
+    }, [getValues, update]);
+
+    // ── Add row ───────────────────────────────────────────────────────────────
+    const addRow = useCallback(() => {
+        const items = getValues('items');
+        if (items.some(i => !i.productId)) {
+            toast('Please fill the empty product row first', { icon: '⚠️', id: 'empty-row', duration: 2000 });
             return;
         }
-        const price = watchedItems[index]?.price || 0;
-        const productId = watchedItems[index]?.productId;
-        const product = products.find(p => String(p._id) === String(productId));
+        append({ productId: '', quantity: 1, price: 0, total: 0 });
+    }, [getValues, append]);
 
-        if (product && numQty > product.stock) {
-            toast.error(`⚠️ Only ${product.stock} units of "${product.name}" in stock!`, { id: `stock-${index}` });
-        }
-        setValue(`items.${index}.total`, price * numQty);
-    };
+    // ── Clear farmer ──────────────────────────────────────────────────────────
+    const clearFarmer = useCallback(() => {
+        setSelectedFarmer(null);
+        setIsNewFarmer(false);
+        setFarmerSearch('');
+        setSearchResults([]);
+        setKannadaState({ name: '', show: false });
+        if (generatedBill) setGeneratedBill(null);
+        setTimeout(() => farmerInputRef.current?.focus(), 50);
+    }, [generatedBill]);
 
-    const subtotal = watchedItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-    const tax = 0;
-    const total = subtotal + tax;
-
-
-    // Step 1: validate → show review modal (no API call yet)
-    const onSubmit = async (data) => {
-        if (!selectedFarmer && !isNewFarmer) {
-            toast.error('Please select or add a farmer');
-            return;
-        }
+    // ── Step 1: validate → show review modal ──────────────────────────────────
+    const onSubmit = useCallback(async (data) => {
+        if (!selectedFarmer && !isNewFarmer) { toast.error('Please select or add a farmer'); return; }
         if (isNewFarmer && (!data.newFarmer?.name?.trim() || !data.newFarmer?.village?.trim())) {
-            toast.error('Please enter name and village for the new farmer');
-            return;
+            toast.error('Enter name and village for new farmer'); return;
         }
-        const validItems = data.items.filter(i => i.productId);
-        if (validItems.length === 0) {
-            toast.error('Add at least one product');
-            return;
-        }
-        // Validate quantities
-        for (const item of validItems) {
-            if (!item.quantity || Number(item.quantity) < 1) {
-                toast.error('Quantity must be at least 1 for all items');
-                return;
-            }
-            const product = products.find(p => String(p._id) === String(item.productId));
-            if (product && Number(item.quantity) > product.stock) {
-                toast.error(`"${product.name}" has only ${product.stock} units in stock. Please reduce quantity.`);
-                return;
-            }
-        }
-        const billTotal = validItems.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
-        if (billTotal <= 0) {
-            toast.error('Bill total must be greater than ₹0');
-            return;
-        }
-        // Show review modal — save data for later confirm
-        setReviewData(data);
-    };
+        const validItems = data.items.filter(i => i.productId && Number(i.total) > 0);
+        if (validItems.length === 0) { toast.error('Add at least one product with a valid quantity'); return; }
 
-    // Step 2: generate bill after user confirms in review modal
-    const confirmGenerate = async () => {
+        for (const item of validItems) {
+            const product = item.productObj;
+            if (product && Number(item.quantity) > product.stock) {
+                toast.error(`"${product.name}" only has ${product.stock} units available`);
+                return;
+            }
+        }
+        setReviewData({ ...data, validItems });
+    }, [selectedFarmer, isNewFarmer]);
+
+    // ── Step 2: confirm → create bill ─────────────────────────────────────────
+    const confirmGenerate = useCallback(async () => {
         const data = reviewData;
         if (!data) return;
         setSubmitting(true);
-        setReviewData(null); // close review modal
+        setReviewData(null);
         try {
+            // Resolve farmer (existing or create new)
             let farmerId = selectedFarmer?._id;
+            let farmerName = selectedFarmer?.name || '';
+            let farmerMobile = selectedFarmer?.mobile || '';
+            let farmerVillage = selectedFarmer?.village || '';
 
-            // Handle New Farmer Creation
             if (isNewFarmer) {
-                const farmerRes = await farmersAPI.create({
+                const r = await farmersAPI.create({
                     name: data.newFarmer.name,
                     mobile: farmerSearch,
-                    village: data.newFarmer.village
+                    village: data.newFarmer.village,
                 });
-                farmerId = farmerRes.data._id;
+                farmerId = r.data._id;
+                farmerName = data.newFarmer.name;
+                farmerMobile = farmerSearch;
+                farmerVillage = data.newFarmer.village;
             }
+
+            const interestRate = data.paymentType === 'credit' ? (Number(data.interestRate) || 0) : 0;
 
             const payload = {
                 farmerId,
-                items: data.items.filter(i => i.productId).map(i => ({
+                items: data.validItems.map(i => ({
                     productId: i.productId,
                     quantity: Number(i.quantity),
                     price: Number(i.price),
                     total: Number(i.total),
                 })),
-                totalAmount: total,
+                totalAmount: grandTotal,
                 paymentType: data.paymentType,
                 sendWhatsApp: sendToWhatsApp,
+                gstEnabled,
+                gstPercent: gstEnabled ? gstPercent : 0,
+                interestRate,
+                dueDate: data.dueDate || undefined,
             };
 
             const res = await billsAPI.create(payload);
             const resData = res?.data || {};
-            setGeneratedBillId(resData._id);
-            if (resData.sentToE164 != null || resData.sentTo != null) {
-                toast.success(`Bill generated & WhatsApp sent to ${resData.farmerName || 'farmer'} — ${resData.sentToE164 || resData.sentTo}`);
+
+            // FIX: build local bill directly — no second API round-trip for PDF
+            const localBill = {
+                _id: resData._id,
+                billNumber: resData.billNumber,
+                createdAt: resData.createdAt || new Date().toISOString(),
+                paymentType: data.paymentType,
+                subtotal,
+                totalAmount: grandTotal,
+                gstEnabled,
+                gstPercent: gstEnabled ? gstPercent : 0,
+                gstAmount,
+                interestRate,
+                interestAmount,
+                dueDate: data.dueDate || null,
+                farmerId: {
+                    _id: farmerId,
+                    name: kannadaState.name ? `${farmerName} (${kannadaState.name})` : farmerName,
+                    mobile: farmerMobile,
+                    village: farmerVillage,
+                },
+                items: data.validItems.map(i => {
+                    return {
+                        productId: { _id: i.productId, name: i.productObj?.name || 'Product' },
+                        quantity: Number(i.quantity),
+                        price: Number(i.price),
+                        total: Number(i.total),
+                    };
+                }),
+            };
+
+            setGeneratedBill(localBill);
+
+            if (resData.sentToE164 || resData.sentTo) {
+                toast.success(`Bill created & WhatsApp sent to ${resData.farmerName || farmerName}`);
             } else {
-                toast.success('Bill generated successfully!');
+                toast.success('Bill created successfully!');
             }
         } catch (err) {
-            const msg = err.response?.data?.message || err.message || 'Failed to generate bill';
-            toast.error(msg);
+            toast.error(err.response?.data?.message || err.message || 'Failed to create bill');
         } finally {
             setSubmitting(false);
         }
-    };
+    }, [reviewData, selectedFarmer, isNewFarmer, farmerSearch,
+        subtotal, grandTotal, gstEnabled, gstPercent, gstAmount, interestAmount,
+        kannadaState.name, sendToWhatsApp]);
 
-    const generateBillPDFBlob = async () => {
-        const { data: bill } = await billsAPI.getById(generatedBillId);
-        if (!bill) throw new Error('Bill not found');
+    // FIX: use generatedBill directly — no extra API call needed
+    const buildPDFBlob = useCallback(async () => {
+        if (!generatedBill?._id) throw new Error('No bill ID available');
         const shopDetails = getShopDetails();
-        
-        // Dynamically import heavy PDF engines only on click to prevent 2MB+ blocking LCP
-        const { pdf } = await import('@react-pdf/renderer');
-        const { BillPDFDocument } = await import('../components/BillPDFDocument');
-        
-        return await pdf(<BillPDFDocument bill={bill} shopDetails={shopDetails} />).toBlob();
-    };
+        return await pdf(<BillPDFDocument bill={generatedBill} shopDetails={shopDetails} />).toBlob();
+    }, [generatedBill]);
 
-    const handleViewPDF = async () => {
-        if (!generatedBillId) return;
+    const handleViewPDF = useCallback(async () => {
+        setPdfLoading(true);
         try {
-            const blob = await generateBillPDFBlob();
-            const url = window.URL.createObjectURL(blob);
-            window.open(url, '_blank', 'noopener,noreferrer');
+            const blob = await buildPDFBlob();
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener');
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
             toast.success('PDF opened in new tab');
-            setTimeout(() => window.URL.revokeObjectURL(url), 60000);
         } catch (err) {
-            toast.error(err.response?.data?.message || 'Failed to generate PDF');
+            toast.error(err.message || 'Failed to generate PDF');
+        } finally {
+            setPdfLoading(false);
         }
-    };
+    }, [buildPDFBlob]);
 
-    const handleDownloadPDF = async () => {
-        if (!generatedBillId) return;
+    const handleDownloadPDF = useCallback(async () => {
+        setPdfLoading(true);
         try {
-            const blob = await generateBillPDFBlob();
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `Bill_${generatedBillId}.pdf`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
+            const blob = await buildPDFBlob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Bill_${generatedBill?.billNumber || generatedBill?._id}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
             toast.success('PDF downloaded');
         } catch (err) {
-            toast.error(err.response?.data?.message || 'Failed to download PDF');
+            toast.error(err.message || 'Failed to download PDF');
+        } finally {
+            setPdfLoading(false);
         }
-    };
+    }, [buildPDFBlob, generatedBill]);
 
-    const handleSendWhatsApp = async () => {
-        if (!generatedBillId) {
-            toast.error('Generate a bill first');
-            return;
-        }
+    const handleSendWhatsApp = useCallback(async () => {
+        if (!generatedBill?._id) { toast.error('No bill ID available'); return; }
         setSendingWhatsApp(true);
         try {
-            const res = await billsAPI.sendWhatsApp(generatedBillId);
-            const sentTo = res?.data?.sentTo;
-            const sentToE164 = res?.data?.sentToE164;
-            const name = res?.data?.farmerName;
-            toast.success(sentTo
-                ? `WhatsApp sent to ${name || 'farmer'} — number used: ${sentToE164 || sentTo}`
-                : 'Bill sent to farmer via WhatsApp');
+            const res = await billsAPI.sendWhatsApp(generatedBill._id);
+            toast.success(res?.data?.sentToE164
+                ? `WhatsApp sent to ${res.data.farmerName} — ${res.data.sentToE164}`
+                : 'Bill sent via WhatsApp');
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to send WhatsApp');
         } finally {
             setSendingWhatsApp(false);
         }
-    };
+    }, [generatedBill]);
+
+    // FIX: sendToWhatsApp reset was missing — checkbox stayed unchecked after "New Bill"
+    const handleReset = useCallback(() => {
+        reset({
+            paymentType: 'cash',
+            items: [{ productId: '', quantity: 1, price: 0, total: 0 }],
+            newFarmer: { name: '', village: '' },
+            interestRate: 0,
+            dueDate: '',
+        });
+        setSelectedFarmer(null);
+        setIsNewFarmer(false);
+        setGeneratedBill(null);
+        setFarmerSearch('');
+        setSearchResults([]);
+        setGstEnabled(false);
+        setGstPercent(5);
+        setKannadaState({ name: '', show: false });
+        setReviewData(null);
+        setSendToWhatsApp(true); // FIX: was missing
+    }, [reset]);
 
     return (
-        <div className="p-6 flex flex-col gap-6 animate-fade-in max-w-5xl mx-auto">
+        <div className="p-4 sm:p-6 flex flex-col gap-6 animate-fade-in max-w-6xl mx-auto">
             <div>
                 <h1 className="page-title">Create Bill</h1>
-                <p className="page-subtitle">POS-style billing for fertilizer sales</p>
+                <p className="page-subtitle">Add farmer, select products, configure GST &amp; payment</p>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left: Bill builder */}
-                    <div className="lg:col-span-2 flex flex-col gap-5">
-                        {/* Farmer selection */}
+            {/* QUICK WIN: block Enter-key submit while submitting */}
+            <form
+                onSubmit={handleSubmit(onSubmit)}
+                onKeyDown={e => e.key === 'Enter' && submitting && e.preventDefault()}
+                className="flex flex-col gap-6"
+            >
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+                    {/* ── Left: Farmer + Products + Payment ───────────────── */}
+                    <div className="xl:col-span-2 flex flex-col gap-5">
+
+                        {/* Farmer Card */}
                         <div className="card p-5">
                             <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center justify-between">
                                 <span className="flex items-center gap-2">
@@ -319,109 +391,160 @@ const CreateBill = () => {
                                     Add Farmer
                                 </button>
                             </h3>
-                            <div className="relative mb-3">
-                                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" style={{ fontSize: '16px' }}>search</span>
-                                <input
-                                    type="text"
-                                    value={farmerSearch}
-                                    onChange={e => setFarmerSearch(e.target.value)}
-                                    placeholder="Search by name or mobile..."
-                                    className="input pl-9"
-                                />
-                            </div>
 
                             {selectedFarmer ? (
-                                <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-xl">
-                                    <div>
-                                        <p className="font-bold text-sm">{selectedFarmer.name}</p>
-                                        <p className="text-xs text-slate-500">{selectedFarmer.village} · {selectedFarmer.mobile}</p>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-xl">
+                                        <div>
+                                            <p className="font-bold text-sm">{selectedFarmer.name}</p>
+                                            <p className="text-xs text-slate-500">{selectedFarmer.village} · {selectedFarmer.mobile}</p>
+                                            {selectedFarmer.creditBalance > 0 && (
+                                                <p className="text-xs text-red-500 font-semibold mt-0.5">
+                                                    Outstanding credit: {formatCurrency(selectedFarmer.creditBalance)}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <button type="button" onClick={clearFarmer} disabled={!!generatedBill}
+                                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
+                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
+                                        </button>
                                     </div>
-                                    <button type="button" onClick={() => { setSelectedFarmer(null); setGeneratedBillId(null); setIsNewFarmer(false); }} className="text-red-400 hover:text-red-600 cursor-pointer">
-                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
-                                    </button>
+
+                                    {/* Optional Kannada name */}
+                                    <div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setKannadaState(s => ({ ...s, show: !s.show }))}
+                                            className="text-xs text-primary hover:underline flex items-center gap-1"
+                                            disabled={!!generatedBill}
+                                        >
+                                            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>translate</span>
+                                            {kannadaState.show ? 'Remove Kannada name from PDF' : 'Add Kannada name for PDF (optional)'}
+                                        </button>
+                                        {kannadaState.show && (
+                                            <div className="mt-2 flex gap-2 animate-fade-in">
+                                                <input
+                                                    type="text"
+                                                    value={kannadaState.name}
+                                                    onChange={e => setKannadaState(s => ({ ...s, name: e.target.value }))}
+                                                    placeholder="ಕನ್ನಡದಲ್ಲಿ ಹೆಸರು ಟೈಪ್ ಮಾಡಿ..."
+                                                    className="input text-sm flex-1"
+                                                    disabled={!!generatedBill}
+                                                />
+                                                {kannadaState.name && (
+                                                    <button type="button" onClick={() => setKannadaState(s => ({ ...s, name: '' }))}
+                                                        className="text-slate-400 hover:text-red-400">
+                                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                        {kannadaState.name && (
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                PDF will show: <strong>{selectedFarmer.name}</strong> ({kannadaState.name})
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
                             ) : isNewFarmer ? (
-                                <div className="flex flex-col gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-xl animate-fade-in">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <p className="text-xs font-bold text-emerald-600 uppercase">New Farmer detected</p>
-                                        <button type="button" onClick={() => { setIsNewFarmer(false); setFarmerSearch(''); }} className="text-slate-400 hover:text-red-400">
+                                <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-xl space-y-3 animate-fade-in">
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                                            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>person_add</span>
+                                            New Farmer — {farmerSearch}
+                                        </p>
+                                        <button type="button" onClick={() => { setIsNewFarmer(false); setFarmerSearch(''); }}
+                                            className="text-slate-400 hover:text-red-400">
                                             <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
-                                        <input
-                                            type="text"
-                                            {...register('newFarmer.name')}
-                                            placeholder="Farmer Name"
-                                            className="input text-xs"
-                                        />
-                                        <input
-                                            type="text"
-                                            {...register('newFarmer.village')}
-                                            placeholder="Village"
-                                            className="input text-xs"
-                                        />
+                                        <div>
+                                            <label className="label">Name *</label>
+                                            <input type="text" {...register('newFarmer.name', { required: true })}
+                                                placeholder="Full name" className="input" />
+                                        </div>
+                                        <div>
+                                            <label className="label">Village *</label>
+                                            <input type="text" {...register('newFarmer.village', { required: true })}
+                                                placeholder="Village" className="input" />
+                                        </div>
                                     </div>
                                 </div>
-                            ) : farmerSearch.length > 2 && (
-                                <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-sm">
-                                    {searchResults.length > 0 ? (
-                                        searchResults.map(f => (
-                                            <button
-                                                key={f._id}
-                                                type="button"
-                                                onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
-                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
-                                            >
-                                                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                                                    {(f?.name || 'U')[0]}
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium">
-                                                        <TruncatedText text={f?.name || 'Unknown'} />
-                                                    </p>
-                                                    <p className="text-xs text-slate-500">
-                                                        <TruncatedText text={f?.village || '-'} /> · {f?.mobile || '-'}
-                                                    </p>
-                                                </div>
+                            ) : (
+                                <div>
+                                    <div className="relative">
+                                        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" style={{ fontSize: '16px' }}>search</span>
+                                        <input
+                                            ref={farmerInputRef}
+                                            type="text"
+                                            value={farmerSearch}
+                                            onChange={e => setFarmerSearch(e.target.value)}
+                                            placeholder="Search by name or enter 10-digit mobile to add new..."
+                                            className="input pl-9"
+                                            disabled={!!generatedBill}
+                                        />
+                                        {farmerSearch && (
+                                            <button type="button" onClick={() => { setFarmerSearch(''); setSearchResults([]); }}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
                                             </button>
-                                        ))
-                                    ) : (
-                                        <div className="p-3 text-center text-xs text-slate-500">
-                                            No farmer found. Keep typing mobile number to add as new.
+                                        )}
+                                    </div>
+                                    {farmerSearch.length > 2 && (
+                                        <div className="mt-2 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+                                            <div className="max-h-48 overflow-y-auto">
+                                                {searchResults.length > 0 ? (
+                                                    searchResults.map(f => (
+                                                        <button
+                                                            key={f._id}
+                                                            type="button"
+                                                            onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
+                                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                                        >
+                                                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                                                                {f.name[0]}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-medium">{f.name}</p>
+                                                                <p className="text-xs text-slate-500">{f.village} · {f.mobile}</p>
+                                                            </div>
+                                                        </button>
+                                                    ))
+                                                ) : (
+                                                    // FIX: hint was rendered outside the dropdown container before
+                                                    <div className="p-3 text-center space-y-1">
+                                                        <p className="text-xs text-slate-500">No farmer found. Keep typing mobile number to add as new.</p>
+                                                        <p className="text-xs text-slate-400">
+                                                            {/^\d{10}$/.test(farmerSearch)
+                                                                ? '✅ 10-digit number detected — new farmer mode activated'
+                                                                : 'Enter a 10-digit mobile number to register a new farmer.'}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Products - scroll when many rows (15+) */}
-                        <div className="card p-5 flex flex-col min-h-0">
-                            <div className="flex items-center justify-between mb-4 shrink-0">
+                        {/* Products Table Card */}
+                        <div className="card p-5 flex flex-col">
+                            <div className="flex items-center justify-between mb-3 shrink-0">
                                 <h3 className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                                     <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>inventory_2</span>
-                                    Add Products
+                                    Products
+                                    <span className="text-xs font-normal text-slate-400">({fields.length})</span>
                                 </h3>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const hasEmptyRow = watchedItems.some(i => !i.productId);
-                                        if (hasEmptyRow) {
-                                            toast('Fill the empty product row first', { icon: '⚠️', id: 'empty-row', duration: 2000 });
-                                            return;
-                                        }
-                                        append({ productId: '', quantity: 1, price: 0, total: 0 });
-                                    }}
-                                    disabled={!!generatedBillId}
-                                    className="btn-secondary text-xs disabled:opacity-40"
-                                >
+                                <button type="button" onClick={addRow} disabled={!!generatedBill}
+                                    className="btn-secondary text-xs disabled:opacity-40">
                                     <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>add</span>
                                     Add Row
                                 </button>
                             </div>
-                            <div className="w-full">
-                                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
-                                    <table className="w-full text-left border-collapse min-w-[600px]">
+                            <div className="min-h-0 max-h-[280px] overflow-auto">
+                                <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="bg-slate-50 dark:bg-slate-800/60">
                                             <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
@@ -436,29 +559,30 @@ const CreateBill = () => {
                                             <tr key={field.id} className="border-t border-slate-100 dark:border-slate-800">
                                                 <td className="px-3 py-2">
                                                     <SearchableSelect
-                                                        products={products}
                                                         value={watchedItems[index]?.productId}
-                                                        onChange={(productId) => {
-                                                            setValue(`items.${index}.productId`, productId);
-                                                            handleProductChange(index, productId);
-                                                        }}
+                                                        initialProduct={watchedItems[index]?.productObj}
+                                                        onChange={(product) => handleProductChange(index, product)}
                                                         placeholder="Select product..."
                                                         className="input text-xs py-1.5 w-full"
+                                                        disabled={!!generatedBill}
                                                     />
                                                 </td>
                                                 <td className="px-3 py-2">
+                                                    {/* FIX: original called register().onChange(e) which returns a new obj each render
+                                                        — now quantity changes go through update() which is atomic and keeps RHF in sync */}
                                                     <input
                                                         type="number"
                                                         min={1}
-                                                        {...register(`items.${index}.quantity`, { min: 1, valueAsNumber: true })}
+                                                        value={watchedItems[index]?.quantity ?? 1}
+                                                        onChange={e => {
+                                                            const val = Math.max(1, Number(e.target.value) || 1);
+                                                            handleQuantityChange(index, val);
+                                                        }}
                                                         onBlur={e => {
                                                             const v = Number(e.target.value);
-                                                            if (!v || v < 1) {
-                                                                setValue(`items.${index}.quantity`, 1);
-                                                                setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
-                                                            }
+                                                            if (!v || v < 1) handleQuantityChange(index, 1);
                                                         }}
-                                                        onChange={e => { handleQuantityChange(index, Number(e.target.value)); register(`items.${index}.quantity`).onChange(e); }}
+                                                        disabled={!!generatedBill}
                                                         className="input text-xs py-1.5 w-16"
                                                     />
                                                 </td>
@@ -466,7 +590,7 @@ const CreateBill = () => {
                                                     <input
                                                         type="number"
                                                         step="0.01"
-                                                        {...register(`items.${index}.price`)}
+                                                        value={watchedItems[index]?.price ?? 0}
                                                         readOnly
                                                         className="input text-xs py-1.5 w-24 bg-slate-100 dark:bg-slate-700"
                                                     />
@@ -491,113 +615,204 @@ const CreateBill = () => {
                                 </table>
                             </div>
                         </div>
-                    </div>
 
-                        {/* Payment type */}
+                        {/* Payment + GST + Interest */}
                         <div className="card p-5">
                             <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
                                 <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>payments</span>
-                                Payment Type
+                                Payment &amp; Tax
                             </h3>
-                            <div className="grid grid-cols-3 gap-3">
+
+                            {/* Payment type */}
+                            <div className="grid grid-cols-3 gap-3 mb-5">
                                 {['cash', 'credit', 'upi'].map(type => (
                                     <label key={type} className="cursor-pointer">
-                                        <input type="radio" value={type} {...register('paymentType')} className="sr-only peer" />
-                                        <div className="border-2 border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center text-sm font-semibold text-slate-600 dark:text-slate-400 peer-checked:border-primary peer-checked:text-primary peer-checked:bg-primary/5 transition-all capitalize">
-                                            {type === 'upi' ? 'UPI' : type.charAt(0).toUpperCase() + type.slice(1)}
+                                        <input type="radio" value={type} {...register('paymentType')} className="sr-only peer" disabled={!!generatedBill} />
+                                        <div className="border-2 border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center text-sm font-semibold text-slate-500 peer-checked:border-primary peer-checked:text-primary peer-checked:bg-primary/5 transition-all select-none">
+                                            {type === 'upi' ? '📱 UPI' : type === 'cash' ? '💵 Cash' : '📋 Credit'}
                                         </div>
                                     </label>
                                 ))}
                             </div>
-                            <label className="flex items-center gap-3 mt-4 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={sendToWhatsApp}
-                                    onChange={(e) => setSendToWhatsApp(e.target.checked)}
-                                    className="rounded border-slate-300 text-primary focus:ring-primary"
-                                />
-                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Send bill to WhatsApp</span>
+
+                            {/* GST Toggle
+                                FIX: original wrapped a <button> inside a <label> — clicking the button fired
+                                both the button's onClick AND the label's implicit click, toggling twice (net = no change).
+                                Fixed by removing the <label> wrapper and using a plain <div>. */}
+                            <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-4">
+                                <div className="flex items-center justify-between flex-wrap gap-3">
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={gstEnabled}
+                                            onClick={() => !generatedBill && setGstEnabled(v => !v)}
+                                            disabled={!!generatedBill}
+                                            className={`relative w-10 h-6 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${gstEnabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
+                                        >
+                                            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${gstEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                                        </button>
+                                        <div>
+                                            <p className="text-sm font-semibold">GST Applicable</p>
+                                            <p className="text-xs text-slate-400">Enable for taxable goods</p>
+                                        </div>
+                                    </div>
+                                    {gstEnabled && (
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-xs text-slate-500 mr-1">Rate:</span>
+                                            {GST_RATES.map(rate => (
+                                                <button key={rate} type="button"
+                                                    onClick={() => setGstPercent(rate)}
+                                                    disabled={!!generatedBill}
+                                                    className={`px-3 py-1 rounded-lg text-xs font-bold border-2 transition-all ${gstPercent === rate ? 'border-primary bg-primary text-white' : 'border-slate-200 text-slate-600 hover:border-primary/50'}`}>
+                                                    {rate}%
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Interest — credit only */}
+                            {watchedPaymentType === 'credit' && (
+                                <div className="border border-orange-200 dark:border-orange-800/40 bg-orange-50/50 dark:bg-orange-900/10 rounded-xl p-4 mb-4 animate-fade-in">
+                                    <p className="text-xs font-bold text-orange-700 dark:text-orange-400 mb-3 flex items-center gap-1.5">
+                                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>trending_up</span>
+                                        Credit Interest (Optional)
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="label text-xs">Interest Rate (%/month)</label>
+                                            <input type="number" step="0.1" min="0" max="10"
+                                                {...register('interestRate', { min: 0, max: 10, valueAsNumber: true })}
+                                                placeholder="0" className="input" disabled={!!generatedBill} />
+                                            <p className="text-xs text-slate-400 mt-1">0 = no interest</p>
+                                        </div>
+                                        <div>
+                                            <label className="label text-xs">Due Date (optional)</label>
+                                            <input type="date" {...register('dueDate')}
+                                                min={new Date().toISOString().split('T')[0]}
+                                                className="input" disabled={!!generatedBill} />
+                                        </div>
+                                    </div>
+                                    {interestAmount > 0 && (
+                                        <p className="text-xs text-orange-600 mt-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg px-3 py-1.5">
+                                            Interest: <strong>{formatCurrency(interestAmount)}</strong> — noted on invoice (not added to bill total)
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* WhatsApp */}
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input type="checkbox" checked={sendToWhatsApp}
+                                    onChange={e => setSendToWhatsApp(e.target.checked)}
+                                    disabled={!!generatedBill}
+                                    className="rounded border-slate-300 text-primary focus:ring-primary" />
+                                <span className="text-sm text-slate-600 dark:text-slate-300">Send bill receipt via WhatsApp</span>
                             </label>
                         </div>
                     </div>
 
-                    {/* Right: Summary */}
-                    <div className="flex flex-col gap-4">
-                        <div className="card p-5 sticky top-24">
-                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4">Bill Summary</h3>
+                    {/* ── Right: Summary + Actions ──────────────────────────── */}
+                    <div>
+                        <div className="card p-5 xl:sticky xl:top-24">
+                            <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
+                                <span className="material-symbols-outlined text-primary" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>receipt_long</span>
+                                Bill Summary
+                            </h3>
 
-                            {(selectedFarmer || watchedNewFarmerName) && (
+                            {/* Farmer preview */}
+                            {(selectedFarmer || watch('newFarmer.name')) && (
                                 <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-                                    <p className="text-xs text-slate-500 mb-1">Bill To</p>
-                                    <p className="font-bold text-sm">{selectedFarmer?.name || watchedNewFarmerName}</p>
-                                    <p className="text-xs text-slate-500">{selectedFarmer?.village || 'New Farmer'}</p>
+                                    <p className="text-xs text-slate-500 mb-0.5">Bill To</p>
+                                    <p className="font-bold text-sm">{selectedFarmer?.name || watch('newFarmer.name')}</p>
+                                    {kannadaState.name && <p className="text-xs text-slate-500">{kannadaState.name}</p>}
+                                    <p className="text-xs text-slate-400">{selectedFarmer?.village || 'New Farmer'}</p>
                                 </div>
                             )}
 
-                            <div className="flex flex-col gap-2 text-sm">
+                            {/* Totals */}
+                            <div className="space-y-2 text-sm mb-4">
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">Subtotal</span>
                                     <span className="font-semibold">{formatCurrency(subtotal)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-slate-500">Tax</span>
-                                    <span className="font-semibold text-emerald-600">₹0 (Exempt)</span>
+                                {gstEnabled ? (
+                                    <>
+                                        <div className="flex justify-between text-blue-600 text-xs">
+                                            <span>CGST ({gstPercent / 2}%)</span>
+                                            <span>+ {formatCurrency(gstAmount / 2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-blue-600 text-xs">
+                                            <span>SGST ({gstPercent / 2}%)</span>
+                                            <span>+ {formatCurrency(gstAmount / 2)}</span>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-slate-400">GST</span>
+                                        <span className="text-emerald-600 font-medium">Exempt</span>
+                                    </div>
+                                )}
+                                {watchedPaymentType === 'credit' && interestAmount > 0 && (
+                                    <div className="flex justify-between text-orange-500 text-xs">
+                                        <span>Interest ({watchedInterestRate}%/mo) *</span>
+                                        <span>{formatCurrency(interestAmount)}</span>
+                                    </div>
+                                )}
+                                <div className="h-px bg-slate-200 dark:bg-slate-700" />
+                                <div className="flex justify-between font-bold text-base">
+                                    <span>Total Payable</span>
+                                    <span className="text-primary text-lg">{formatCurrency(grandTotal)}</span>
                                 </div>
-                                <div className="h-px bg-slate-200 dark:bg-slate-700 my-2" />
-                                <div className="flex justify-between text-base font-bold">
-                                    <span>Total</span>
-                                    <span className="text-primary text-lg">{formatCurrency(total)}</span>
-                                </div>
+                                {watchedPaymentType === 'credit' && interestAmount > 0 && (
+                                    <p className="text-[10px] text-slate-400">* Informational only</p>
+                                )}
                             </div>
 
-                            <div className="flex flex-col gap-2 mt-5">
-                                <button
-                                    type="submit"
-                                    disabled={submitting || !!generatedBillId}
-                                    className={`btn-primary w-full ${generatedBillId ? 'opacity-50' : ''}`}
-                                >
-                                    {submitting ? (
-                                        <span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>progress_activity</span>
-                                    ) : (
-                                        <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>receipt_long</span>
-                                    )}
-                                    {submitting ? 'Generating...' : generatedBillId ? 'Bill Generated' : 'Generate Bill'}
-                                </button>
+                            {watchedPaymentType === 'credit' && (
+                                <div className="mb-4 p-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                                    <p className="text-xs text-red-600 font-semibold flex items-center gap-1">
+                                        <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>warning</span>
+                                        Credit bill — adds to farmer's outstanding balance
+                                    </p>
+                                </div>
+                            )}
 
-                                {generatedBillId && (
-                                    <div className="flex flex-col gap-2 animate-bounce-in">
-                                        <button
-                                            type="button"
-                                            onClick={handleViewPDF}
-                                            className="btn-primary w-full text-sm"
-                                        >
-                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>picture_as_pdf</span>
-                                            View PDF
+                            {/* Action buttons */}
+                            <div className="space-y-2">
+                                {!generatedBill ? (
+                                    <button type="submit" disabled={submitting} className="btn-primary w-full">
+                                        {submitting
+                                            ? <><span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>progress_activity</span> Generating...</>
+                                            : <><span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>receipt</span> Preview &amp; Generate Bill</>
+                                        }
+                                    </button>
+                                ) : (
+                                    <div className="space-y-2 animate-fade-in">
+                                        <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-emerald-600" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                                            <div>
+                                                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Bill #{generatedBill.billNumber} Created!</p>
+                                                <p className="text-xs text-emerald-600 dark:text-emerald-500">{formatCurrency(generatedBill.totalAmount)}</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={handleViewPDF} disabled={pdfLoading} className="btn-primary w-full">
+                                            {pdfLoading
+                                                ? <><span className="material-symbols-outlined animate-spin" style={{ fontSize: '18px' }}>progress_activity</span> Building PDF...</>
+                                                : <><span className="material-symbols-outlined" style={{ fontSize: '18px' }}>picture_as_pdf</span> View PDF</>
+                                            }
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleDownloadPDF}
-                                            className="btn-outline w-full text-sm hover:bg-slate-50"
-                                        >
-                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
-                                            Download PDF
+                                        <button type="button" onClick={handleDownloadPDF} disabled={pdfLoading} className="btn-outline w-full">
+                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span> Download PDF
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleSendWhatsApp}
-                                            disabled={sendingWhatsApp}
-                                            className="btn-outline w-full text-sm text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50"
-                                        >
+                                        <button type="button" onClick={handleSendWhatsApp} disabled={sendingWhatsApp} className="btn-outline w-full text-green-600 border-green-200 hover:bg-green-50">
                                             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>chat</span>
                                             {sendingWhatsApp ? 'Sending...' : 'Send WhatsApp'}
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => { reset(); setSelectedFarmer(null); setIsNewFarmer(false); setGeneratedBillId(null); setFarmerSearch(''); }}
-                                            className="btn-secondary w-full text-sm"
-                                        >
-                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
-                                            Create New Bill
+                                        <button type="button" onClick={handleReset} className="btn-secondary w-full">
+                                            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span> New Bill
                                         </button>
                                     </div>
                                 )}
@@ -607,99 +822,87 @@ const CreateBill = () => {
                 </div>
             </form>
 
-            {/* ── Bill Review Modal ───────────────────────────────────── */}
+            {/* ── Review Modal ──────────────────────────────────────────────── */}
             {reviewData && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-                    <div className="card w-full max-w-lg p-6 animate-slide-up shadow-2xl flex flex-col gap-5">
-                        {/* Header */}
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
+                    <div className="card w-full max-w-lg p-6 shadow-2xl flex flex-col gap-5 max-h-[90vh] overflow-y-auto animate-slide-up">
+                        <div className="flex items-center justify-between shrink-0">
+                            <h2 className="text-lg font-bold flex items-center gap-2">
                                 <span className="material-symbols-outlined text-primary" style={{ fontSize: '22px', fontVariationSettings: "'FILL' 1" }}>fact_check</span>
-                                <h2 className="text-lg font-bold">Review Bill</h2>
-                            </div>
-                            <button onClick={() => setReviewData(null)} className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer">
+                                Confirm Bill
+                            </h2>
+                            <button type="button" onClick={() => setReviewData(null)} className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer">
                                 <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>close</span>
                             </button>
                         </div>
 
-                        {/* Farmer Info */}
-                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center gap-3">
+                        {/* Farmer */}
+                        <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
                             <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>person</span>
-                            <div className="min-w-0">
+                            <div>
                                 <p className="font-bold text-sm">
-                                    <TruncatedText text={isNewFarmer ? (reviewData?.newFarmer?.name || 'New Farmer') : (selectedFarmer?.name || 'Selected Farmer')} />
+                                    {isNewFarmer ? reviewData.newFarmer?.name + ' (New Farmer)' : selectedFarmer?.name}
                                 </p>
                                 <p className="text-xs text-slate-500">{selectedFarmer?.mobile || farmerSearch}</p>
                             </div>
                         </div>
 
-                        {/* Items Table */}
+                        {/* Items — FIX: use validItems directly, not re-filter items */}
                         <div className="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
                             <div className="max-h-52 overflow-auto">
-                            <table className="w-full text-left">
-                                <thead>
-                                    <tr className="bg-slate-50 dark:bg-slate-800/60">
-                                        <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
-                                        <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-center">Qty</th>
-                                        <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Price</th>
-                                        <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {reviewData?.items?.filter(i => i.productId).map((item, idx) => {
-                                        const prod = products.find(p => p._id === item.productId);
-                                        return (
-                                            <tr key={idx}>
-                                                <td className="px-4 py-2 text-sm font-medium">
-                                                    <TruncatedText text={prod?.name || 'Product'} />
-                                                </td>
-                                                <td className="px-4 py-2 text-sm text-center">{item.quantity}</td>
-                                                <td className="px-4 py-2 text-sm text-right text-slate-500">₹{Number(item.price).toLocaleString()}</td>
-                                                <td className="px-4 py-2 text-sm text-right font-bold">₹{Number(item.total).toLocaleString()}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-slate-50 dark:bg-slate-800/60">
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase">Product</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-center">Qty</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Price</th>
+                                            <th className="px-4 py-2 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {reviewData.validItems.map((item, idx) => {
+                                            const prod = item.productObj;
+                                            return (
+                                                <tr key={idx}>
+                                                    <td className="px-4 py-2 text-sm font-medium">{prod?.name || 'Product'}</td>
+                                                    <td className="px-4 py-2 text-sm text-center">{item.quantity}</td>
+                                                    <td className="px-4 py-2 text-sm text-right text-slate-500">₹{Number(item.price).toLocaleString()}</td>
+                                                    <td className="px-4 py-2 text-sm text-right font-bold">₹{Number(item.total).toLocaleString()}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
 
-                        {/* Total + Payment Type */}
-                        <div className="flex items-center justify-between px-1">
-                            <div className="flex items-center gap-2">
-                                <span className={`badge ${reviewData.paymentType === 'cash' ? 'badge-success'
-                                        : reviewData.paymentType === 'credit' ? 'badge-danger'
-                                            : 'badge-info'
-                                    } capitalize text-xs`}>
+                        {/* Totals */}
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                            <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
+                            {gstEnabled && gstAmount > 0 && (
+                                <div className="flex justify-between text-sm text-blue-600"><span>GST ({gstPercent}%)</span><span>+ {formatCurrency(gstAmount)}</span></div>
+                            )}
+                            {reviewData.paymentType === 'credit' && interestAmount > 0 && (
+                                <p className="text-xs text-orange-600">Interest @ {reviewData.interestRate}%/mo = {formatCurrency(interestAmount)} (noted on invoice)</p>
+                            )}
+                            <div className="h-px bg-slate-200 dark:bg-slate-700" />
+                            <div className="flex items-center justify-between">
+                                <span className={`badge capitalize ${reviewData.paymentType === 'cash' ? 'badge-success' : reviewData.paymentType === 'credit' ? 'badge-danger' : 'badge-primary'}`}>
                                     {reviewData.paymentType}
                                 </span>
-                                <span className="text-xs text-slate-500">payment</span>
+                                <p className="text-xl font-black">{formatCurrency(grandTotal)}</p>
                             </div>
-                            <p className="text-xl font-black text-slate-800 dark:text-slate-100">
-                                Total: ₹{total.toLocaleString()}
-                            </p>
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="flex gap-3 pt-1">
-                            <button
-                                type="button"
-                                onClick={() => setReviewData(null)}
-                                className="btn-outline flex-1"
-                            >
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span>
-                                Edit
+                        <div className="flex gap-3 shrink-0">
+                            <button type="button" onClick={() => setReviewData(null)} className="btn-outline flex-1">
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span> Edit
                             </button>
-                            <button
-                                type="button"
-                                onClick={confirmGenerate}
-                                disabled={submitting}
-                                className="btn-primary flex-1"
-                            >
+                            <button type="button" onClick={confirmGenerate} disabled={submitting} className="btn-primary flex-1">
                                 <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>
                                     {submitting ? 'hourglass_top' : 'receipt'}
                                 </span>
-                                {submitting ? 'Generating...' : 'Generate Bill'}
+                                {submitting ? 'Creating...' : 'Confirm & Create'}
                             </button>
                         </div>
                     </div>

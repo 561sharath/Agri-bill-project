@@ -173,7 +173,7 @@ export async function sendCreditReminderWhatsApp(farmer) {
 
     // Try to attach credit reminder PDF as document header
     let pdfUrl = null;
-    let pdfFilename = `Credit-Reminder-${farmer.name}.pdf`;
+    let pdfFilename = `Credit-Reminder-${farmer.name}-${Date.now().toString().slice(-4)}.pdf`;
     try {
         const baseUrl = (process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
         if (baseUrl.startsWith('https://') && !baseUrl.includes('localhost')) {
@@ -215,7 +215,7 @@ export async function sendBillWhatsApp(phoneNumber, farmerName, amount, pdfUrl, 
         ? `Paid via ${method}. Thank you.`
         : (upiId || 'Please visit the shop to pay.');
 
-    const pdfFilename = `Invoice-${farmerName}-${amtNum}.pdf`;
+    const pdfFilename = `Invoice-${farmerName}-${amtNum}-${Date.now().toString().slice(-4)}.pdf`;
 
     console.log(`[WhatsApp] Bill → ${farmerName} ₹${amtNum} [${paid ? 'PAID' : 'CREDIT'}]`);
     return sendTemplate(phoneNumber, farmerName, amtNum, actionText, pdfUrl, pdfFilename);
