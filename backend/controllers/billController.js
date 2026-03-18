@@ -130,7 +130,7 @@ export const createBill = async (req, res, next) => {
                 const pdfPath = path.join(BILLS_DIR, `${billId}.pdf`);
                 fs.mkdirSync(BILLS_DIR, { recursive: true });
                 fs.writeFileSync(pdfPath, pdfBuffer);
-                const pdfUrl = `${baseUrl}/bills/${billId}.pdf`;
+                const pdfUrl = `${baseUrl}/bills/${billId}.pdf?t=${Date.now()}`;
                 await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl, bill.paymentType);
                 whatsAppResponse = {
                     success: true,
@@ -259,7 +259,7 @@ export const sendBillWhatsApp = async (req, res, next) => {
         const pdfPath = path.join(BILLS_DIR, `${billId}.pdf`);
         fs.mkdirSync(BILLS_DIR, { recursive: true });
         fs.writeFileSync(pdfPath, pdfBuffer);
-        const pdfUrl = `${baseUrl}/bills/${billId}.pdf`;
+        const pdfUrl = `${baseUrl}/bills/${billId}.pdf?t=${Date.now()}`;
         await sendBillWhatsAppService(farmer.mobile, farmer.name, bill.totalAmount, pdfUrl, bill.paymentType);
         res.json({
             success: true,

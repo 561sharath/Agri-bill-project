@@ -6,6 +6,10 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import connectDB from './config/db.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import Bill from './models/Bill.js';
+import Farmer from './models/Farmer.js';
+import Payment from './models/Payment.js';
+import { generatePDFBuffer, generateCreditReminderPDF, generatePaymentReceiptPDF } from './services/pdfService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,8 +54,68 @@ app.use(cors({
 app.options('*', cors());
 app.use(express.json());
 
-// Static PDF folder – PDFs at /bills/<id>.pdf (use with PUBLIC_APP_URL + ngrok for WhatsApp)
-app.use('/bills', express.static(billsDir));
+// Dynamic PDF serving — always regenerates from DB so style updates reflect immediately.
+// Filename patterns (set by whatsappService / billController):
+//   {billId}.pdf             → invoice PDF
+//   reminder-{farmerId}.pdf  → credit reminder PDF
+//   receipt-{paymentId}.pdf  → payment receipt PDF
+//   cleared-{farmerId}.pdf   → credit cleared receipt PDF
+app.get('/bills/:filename', async (req, res) => {
+    const { filename } = req.params;
+    if (!filename.endsWith('.pdf')) return res.status(400).send('Not a PDF');
+
+    const name = filename.replace(/\.pdf$/, '');
+
+    try {
+        let pdfBuffer;
+        let downloadName = filename;
+
+        if (name.startsWith('reminder-')) {
+            const farmerId = name.replace('reminder-', '');
+            const farmer = await Farmer.findById(farmerId).lean();
+            if (!farmer) return res.status(404).send('Farmer not found');
+            pdfBuffer = await generateCreditReminderPDF(farmer, farmer.creditBalance || 0);
+            downloadName = `Credit-Reminder-${farmer.name}.pdf`;
+
+        } else if (name.startsWith('receipt-')) {
+            const paymentId = name.replace('receipt-', '');
+            const payment = await Payment.findById(paymentId)
+                .populate('farmerId', 'name mobile village creditBalance').lean();
+            if (!payment) return res.status(404).send('Payment not found');
+            const farmer = payment.farmerId || {};
+            pdfBuffer = await generatePaymentReceiptPDF(farmer, payment.amount, farmer.creditBalance || 0);
+            downloadName = `Receipt-${farmer.name}.pdf`;
+
+        } else if (name.startsWith('cleared-')) {
+            const farmerId = name.replace('cleared-', '');
+            const farmer = await Farmer.findById(farmerId).lean();
+            if (!farmer) return res.status(404).send('Farmer not found');
+            pdfBuffer = await generatePaymentReceiptPDF(farmer, 0, 0);
+            downloadName = `Cleared-${farmer.name}.pdf`;
+
+        } else {
+            // Treat as bill ObjectId
+            const bill = await Bill.findById(name)
+                .populate('farmerId', 'name mobile village')
+                .populate('items.productId', 'name').lean();
+            if (!bill) return res.status(404).send('Bill not found');
+            pdfBuffer = await generatePDFBuffer(bill);
+            downloadName = `Invoice-${bill.farmerId?.name || 'bill'}.pdf`;
+        }
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${downloadName}"`);
+        res.setHeader('Cache-Control', 'no-store');
+        return res.end(pdfBuffer);
+
+    } catch (err) {
+        console.error('[PDF] Serve error:', err.message);
+        // Fallback: try to serve from disk if DB lookup fails
+        const diskPath = path.join(billsDir, filename);
+        if (fs.existsSync(diskPath)) return res.sendFile(diskPath);
+        return res.status(500).send('PDF generation failed');
+    }
+});
 
 // Main Routes
 app.use('/api/auth', authRoutes);

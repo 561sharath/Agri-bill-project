@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { pdf } from '@react-pdf/renderer';
 import toast from 'react-hot-toast';
@@ -8,32 +7,60 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { getShopDetails } from '../utils/shopStorage';
 import { BillPDFDocument } from '../components/BillPDFDocument';
 import SearchableSelect from '../components/SearchableSelect';
+import AddFarmerModal from '../components/AddFarmerModal'; // FIX: missing import
+import { transliterateToKannada } from '../utils/transliterate';
 
+// FIX: was referenced in JSX but never defined — caused ReferenceError
+const GST_RATES = [5, 12, 18, 28];
 
+// ── Custom hook: financials ───────────────────────────────────────────────────
+// REFACTOR: extracted 4 inline useMemos → testable, reusable
+function useBillFinancials(items, gstEnabled, gstPercent, paymentType, interestRate) {
+    const subtotal = useMemo(
+        () => items.reduce((sum, i) => sum + (Number(i.total) || 0), 0),
+        [items]
+    );
+    const gstAmount = useMemo(
+        () => gstEnabled ? parseFloat((subtotal * gstPercent / 100).toFixed(2)) : 0,
+        [subtotal, gstEnabled, gstPercent]
+    );
+    const grandTotal = useMemo(
+        () => parseFloat((subtotal + gstAmount).toFixed(2)),
+        [subtotal, gstAmount]
+    );
+    const interestAmount = useMemo(() => {
+        if (paymentType !== 'credit') return 0;
+        const rate = Number(interestRate) || 0;
+        return rate > 0 ? parseFloat((subtotal * rate / 100).toFixed(2)) : 0;
+    }, [subtotal, interestRate, paymentType]);
+
+    return { subtotal, gstAmount, grandTotal, interestAmount };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 const CreateBill = () => {
-    const navigate = useNavigate();
-    const [products, setProducts] = useState([]);
     const [showAddFarmerModal, setShowAddFarmerModal] = useState(false);
     const [farmerSearch, setFarmerSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [selectedFarmer, setSelectedFarmer] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [isNewFarmer, setIsNewFarmer] = useState(false);
-    const [generatedBill, setGeneratedBill] = useState(null); // full bill object for PDF
+    const [generatedBill, setGeneratedBill] = useState(null);
     const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
     const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
     const [reviewData, setReviewData] = useState(null);
     const [pdfLoading, setPdfLoading] = useState(false);
 
-    // Kannada name (optional)
-    const [kannadaName, setKannadaName] = useState('');
-    const [showKannadaInput, setShowKannadaInput] = useState(false);
+    // REFACTOR: two separate state vars (kannadaName + showKannadaInput) → one object
+    const [kannadaState, setKannadaState] = useState({ name: '', show: false });
 
     // GST
     const [gstEnabled, setGstEnabled] = useState(false);
     const [gstPercent, setGstPercent] = useState(5);
 
     const farmerInputRef = useRef(null);
+    // FIX: stale search response race condition — track request ID
+    const searchReqId = useRef(0);
 
     const { register, control, watch, setValue, handleSubmit, reset, getValues } = useForm({
         defaultValues: {
@@ -45,53 +72,42 @@ const CreateBill = () => {
         }
     });
 
-    const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+    const { fields, append, remove, update } = useFieldArray({ control, name: 'items' });
     const watchedPaymentType = watch('paymentType');
     const watchedInterestRate = watch('interestRate');
     const watchedNewFarmerName = watch('newFarmer.name');
+    const watchedItems = watch('items');
 
-    // Per-item totals for summary (watched at top level to avoid per-row re-renders)
-    const watchedItems = watch('items'); // watch handles referential equality better than useWatch for arrays here
+    // ── Financials via custom hook ────────────────────────────────────────────
+    const { subtotal, gstAmount, grandTotal, interestAmount } = useBillFinancials(
+        watchedItems, gstEnabled, gstPercent, watchedPaymentType, watchedInterestRate
+    );
 
-    // Fetch products once
+    // ── Transliteration — REFACTOR: merged two duplicate effects into one ─────
     useEffect(() => {
-        productsAPI.getAll().then(res => {
-            setProducts(Array.isArray(res.data) ? res.data : res.data?.data || []);
-        }).catch(() => toast.error('Failed to load products'));
-    }, []);
-
-    // Auto-transliterate farmer name
-    useEffect(() => {
-        if (selectedFarmer?.name) {
-            transliterateToKannada(selectedFarmer.name).then(res => {
-                if (res) {
-                    setKannadaName(res);
-                    setShowKannadaInput(true);
-                }
+        const name = selectedFarmer?.name || (isNewFarmer ? watchedNewFarmerName : '');
+        if (!name) return;
+        const delay = selectedFarmer?.name ? 0 : 800;
+        const t = setTimeout(() => {
+            transliterateToKannada(name).then(res => {
+                if (res) setKannadaState({ name: res, show: true });
             });
-        }
-    }, [selectedFarmer?.name]);
+        }, delay);
+        return () => clearTimeout(t);
+    }, [selectedFarmer?.name, isNewFarmer, watchedNewFarmerName]);
 
+    // ── Farmer search — FIX: discard stale responses via request ID ──────────
     useEffect(() => {
-        if (isNewFarmer && watchedNewFarmerName) {
-            const t = setTimeout(() => {
-                transliterateToKannada(watchedNewFarmerName).then(res => {
-                    if (res) {
-                        setKannadaName(res);
-                        setShowKannadaInput(true);
-                    }
-                });
-            }, 800);
-            return () => clearTimeout(t);
+        if (farmerSearch.length < 2) {
+            setSearchResults([]);
+            setIsNewFarmer(false);
+            return;
         }
-    }, [isNewFarmer, watchedNewFarmerName]);
-
-    // Debounced farmer search
-    useEffect(() => {
-        if (farmerSearch.length < 2) { setSearchResults([]); setIsNewFarmer(false); return; }
+        const id = ++searchReqId.current;
         const t = setTimeout(async () => {
             try {
                 const res = await farmersAPI.search(farmerSearch);
+                if (id !== searchReqId.current) return; // stale — discard
                 setSearchResults(res.data || []);
                 setIsNewFarmer(res.data.length === 0 && /^\d{10}$/.test(farmerSearch));
             } catch { /* silent */ }
@@ -99,52 +115,59 @@ const CreateBill = () => {
         return () => clearTimeout(t);
     }, [farmerSearch]);
 
-    // ── Computed financials ───────────────────────────────────────────────────
-    const subtotal = useMemo(
-        () => watchedItems.reduce((sum, i) => sum + (Number(i.total) || 0), 0),
-        [watchedItems]
-    );
+    // ── Product / quantity handlers — use update() for atomic RHF state ───────
+    // FIX: original used setValue() per field which caused RHF tracking to diverge;
+    //      update() replaces the whole row atomically so watched values stay in sync
+    const handleProductChange = useCallback((index, product) => {
+        const currentItem = getValues(`items.${index}`);
+        if (product) {
+            // Prevent duplicate selection
+            const allItems = getValues('items');
+            const isDuplicate = allItems.some((item, i) => i !== index && item.productId === product._id);
 
-    const gstAmount = useMemo(
-        () => gstEnabled ? parseFloat((subtotal * gstPercent / 100).toFixed(2)) : 0,
-        [subtotal, gstEnabled, gstPercent]
-    );
+            if (isDuplicate) {
+                toast.error('Item already selected. Increase the quantity if you want.');
+                // Clear the current selection so they can choose something else
+                update(index, { ...currentItem, productId: '', price: 0, total: 0, productObj: null });
+                return;
+            }
 
-    const grandTotal = useMemo(
-        () => parseFloat((subtotal + gstAmount).toFixed(2)),
-        [subtotal, gstAmount]
-    );
+            const qty = Number(currentItem?.quantity) || 1;
+            update(index, { ...currentItem, productId: product._id, price: product.price, total: parseFloat((product.price * qty).toFixed(2)), productObj: product });
+        } else {
+            update(index, { ...currentItem, productId: '', price: 0, total: 0, productObj: null });
+        }
+    }, [getValues, update]);
 
-    const interestAmount = useMemo(() => {
-        if (watchedPaymentType !== 'credit') return 0;
-        const rate = Number(watchedInterestRate) || 0;
-        return rate > 0 ? parseFloat((subtotal * rate / 100).toFixed(2)) : 0;
-    }, [subtotal, watchedInterestRate, watchedPaymentType]);
+    const handleQuantityChange = useCallback((index, quantity) => {
+        const item = getValues(`items.${index}`);
+        if (item && item.productId) {
+            update(index, { ...item, quantity, total: parseFloat(((item.price || 0) * quantity).toFixed(2)) });
+        }
+    }, [getValues, update]);
 
-    // ── Add new row ───────────────────────────────────────────────────────────
+    // ── Add row ───────────────────────────────────────────────────────────────
     const addRow = useCallback(() => {
         const items = getValues('items');
-        const hasEmpty = items.some(i => !i.productId);
-        if (hasEmpty) {
+        if (items.some(i => !i.productId)) {
             toast('Please fill the empty product row first', { icon: '⚠️', id: 'empty-row', duration: 2000 });
             return;
         }
         append({ productId: '', quantity: 1, price: 0, total: 0 });
     }, [getValues, append]);
 
-    // ── Clear farmer ─────────────────────────────────────────────────────────
+    // ── Clear farmer ──────────────────────────────────────────────────────────
     const clearFarmer = useCallback(() => {
         setSelectedFarmer(null);
         setIsNewFarmer(false);
         setFarmerSearch('');
         setSearchResults([]);
-        setKannadaName('');
-        setShowKannadaInput(false);
+        setKannadaState({ name: '', show: false });
         if (generatedBill) setGeneratedBill(null);
         setTimeout(() => farmerInputRef.current?.focus(), 50);
     }, [generatedBill]);
 
-    // ── Step 1: Validate → open review modal ────────────────────────────────
+    // ── Step 1: validate → show review modal ──────────────────────────────────
     const onSubmit = useCallback(async (data) => {
         if (!selectedFarmer && !isNewFarmer) { toast.error('Please select or add a farmer'); return; }
         if (isNewFarmer && (!data.newFarmer?.name?.trim() || !data.newFarmer?.village?.trim())) {
@@ -154,34 +177,41 @@ const CreateBill = () => {
         if (validItems.length === 0) { toast.error('Add at least one product with a valid quantity'); return; }
 
         for (const item of validItems) {
-            const product = products.find(p => String(p._id) === String(item.productId));
+            const product = item.productObj;
             if (product && Number(item.quantity) > product.stock) {
                 toast.error(`"${product.name}" only has ${product.stock} units available`);
                 return;
             }
         }
         setReviewData({ ...data, validItems });
-    }, [selectedFarmer, isNewFarmer, products]);
+    }, [selectedFarmer, isNewFarmer]);
 
-    // ── Step 2: Confirm → create bill ─────────────────────────────────────
+    // ── Step 2: confirm → create bill ─────────────────────────────────────────
     const confirmGenerate = useCallback(async () => {
         const data = reviewData;
         if (!data) return;
         setSubmitting(true);
         setReviewData(null);
         try {
+            // Resolve farmer (existing or create new)
             let farmerId = selectedFarmer?._id;
             let farmerName = selectedFarmer?.name || '';
             let farmerMobile = selectedFarmer?.mobile || '';
             let farmerVillage = selectedFarmer?.village || '';
 
             if (isNewFarmer) {
-                const r = await farmersAPI.create({ name: data.newFarmer.name, mobile: farmerSearch, village: data.newFarmer.village });
+                const r = await farmersAPI.create({
+                    name: data.newFarmer.name,
+                    mobile: farmerSearch,
+                    village: data.newFarmer.village,
+                });
                 farmerId = r.data._id;
                 farmerName = data.newFarmer.name;
                 farmerMobile = farmerSearch;
                 farmerVillage = data.newFarmer.village;
             }
+
+            const interestRate = data.paymentType === 'credit' ? (Number(data.interestRate) || 0) : 0;
 
             const payload = {
                 farmerId,
@@ -196,14 +226,14 @@ const CreateBill = () => {
                 sendWhatsApp: sendToWhatsApp,
                 gstEnabled,
                 gstPercent: gstEnabled ? gstPercent : 0,
-                interestRate: data.paymentType === 'credit' ? (Number(data.interestRate) || 0) : 0,
+                interestRate,
                 dueDate: data.dueDate || undefined,
             };
 
             const res = await billsAPI.create(payload);
             const resData = res?.data || {};
 
-            // Build a local bill object for PDF generation (no extra API call needed)
+            // FIX: build local bill directly — no second API round-trip for PDF
             const localBill = {
                 _id: resData._id,
                 billNumber: resData.billNumber,
@@ -214,19 +244,18 @@ const CreateBill = () => {
                 gstEnabled,
                 gstPercent: gstEnabled ? gstPercent : 0,
                 gstAmount,
-                interestRate: payload.interestRate,
+                interestRate,
                 interestAmount,
                 dueDate: data.dueDate || null,
                 farmerId: {
                     _id: farmerId,
-                    name: kannadaName ? `${farmerName} (${kannadaName})` : farmerName,
+                    name: kannadaState.name ? `${farmerName} (${kannadaState.name})` : farmerName,
                     mobile: farmerMobile,
                     village: farmerVillage,
                 },
                 items: data.validItems.map(i => {
-                    const p = products.find(pr => String(pr._id) === String(i.productId));
                     return {
-                        productId: { _id: i.productId, name: p?.name || 'Product' },
+                        productId: { _id: i.productId, name: i.productObj?.name || 'Product' },
                         quantity: Number(i.quantity),
                         price: Number(i.price),
                         total: Number(i.total),
@@ -246,15 +275,16 @@ const CreateBill = () => {
         } finally {
             setSubmitting(false);
         }
-    }, [reviewData, products, selectedFarmer, isNewFarmer, farmerSearch, subtotal, grandTotal, gstEnabled, gstPercent, gstAmount, interestAmount, kannadaName]);
+    }, [reviewData, selectedFarmer, isNewFarmer, farmerSearch,
+        subtotal, grandTotal, gstEnabled, gstPercent, gstAmount, interestAmount,
+        kannadaState.name, sendToWhatsApp]);
 
-    // Generate bill PDF with react-pdf (used for both view and download); use shop details from Settings
-    const generateBillPDFBlob = async () => {
-        const { data: bill } = await billsAPI.getById(generatedBillId);
-        if (!bill) throw new Error('Bill not found');
+    // FIX: use generatedBill directly — no extra API call needed
+    const buildPDFBlob = useCallback(async () => {
+        if (!generatedBill?._id) throw new Error('No bill ID available');
         const shopDetails = getShopDetails();
-        return await pdf(<BillPDFDocument bill={bill} shopDetails={shopDetails} />).toBlob();
-    };
+        return await pdf(<BillPDFDocument bill={generatedBill} shopDetails={shopDetails} />).toBlob();
+    }, [generatedBill]);
 
     const handleViewPDF = useCallback(async () => {
         setPdfLoading(true);
@@ -306,6 +336,7 @@ const CreateBill = () => {
         }
     }, [generatedBill]);
 
+    // FIX: sendToWhatsApp reset was missing — checkbox stayed unchecked after "New Bill"
     const handleReset = useCallback(() => {
         reset({
             paymentType: 'cash',
@@ -321,9 +352,9 @@ const CreateBill = () => {
         setSearchResults([]);
         setGstEnabled(false);
         setGstPercent(5);
-        setKannadaName('');
-        setShowKannadaInput(false);
+        setKannadaState({ name: '', show: false });
         setReviewData(null);
+        setSendToWhatsApp(true); // FIX: was missing
     }, [reset]);
 
     return (
@@ -333,10 +364,15 @@ const CreateBill = () => {
                 <p className="page-subtitle">Add farmer, select products, configure GST &amp; payment</p>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+            {/* QUICK WIN: block Enter-key submit while submitting */}
+            <form
+                onSubmit={handleSubmit(onSubmit)}
+                onKeyDown={e => e.key === 'Enter' && submitting && e.preventDefault()}
+                className="flex flex-col gap-6"
+            >
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
-                    {/* ── Left: Farmer + Products + Payment ─────────────── */}
+                    {/* ── Left: Farmer + Products + Payment ───────────────── */}
                     <div className="xl:col-span-2 flex flex-col gap-5">
 
                         {/* Farmer Card */}
@@ -378,34 +414,34 @@ const CreateBill = () => {
                                     <div>
                                         <button
                                             type="button"
-                                            onClick={() => setShowKannadaInput(v => !v)}
+                                            onClick={() => setKannadaState(s => ({ ...s, show: !s.show }))}
                                             className="text-xs text-primary hover:underline flex items-center gap-1"
                                             disabled={!!generatedBill}
                                         >
                                             <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>translate</span>
-                                            {showKannadaInput ? 'Remove Kannada name from PDF' : 'Add Kannada name for PDF (optional)'}
+                                            {kannadaState.show ? 'Remove Kannada name from PDF' : 'Add Kannada name for PDF (optional)'}
                                         </button>
-                                        {showKannadaInput && (
+                                        {kannadaState.show && (
                                             <div className="mt-2 flex gap-2 animate-fade-in">
                                                 <input
                                                     type="text"
-                                                    value={kannadaName}
-                                                    onChange={e => setKannadaName(e.target.value)}
+                                                    value={kannadaState.name}
+                                                    onChange={e => setKannadaState(s => ({ ...s, name: e.target.value }))}
                                                     placeholder="ಕನ್ನಡದಲ್ಲಿ ಹೆಸರು ಟೈಪ್ ಮಾಡಿ..."
                                                     className="input text-sm flex-1"
                                                     disabled={!!generatedBill}
                                                 />
-                                                {kannadaName && (
-                                                    <button type="button" onClick={() => setKannadaName('')}
+                                                {kannadaState.name && (
+                                                    <button type="button" onClick={() => setKannadaState(s => ({ ...s, name: '' }))}
                                                         className="text-slate-400 hover:text-red-400">
                                                         <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
                                                     </button>
                                                 )}
                                             </div>
                                         )}
-                                        {kannadaName && (
+                                        {kannadaState.name && (
                                             <p className="text-xs text-slate-500 mt-1">
-                                                PDF will show: <strong>{selectedFarmer.name}</strong> ({kannadaName})
+                                                PDF will show: <strong>{selectedFarmer.name}</strong> ({kannadaState.name})
                                             </p>
                                         )}
                                     </div>
@@ -456,36 +492,37 @@ const CreateBill = () => {
                                         )}
                                     </div>
                                     {farmerSearch.length > 2 && (
-                                        <div className="mt-2 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-sm">
-                                {searchResults.length > 0 ? (
-                                    searchResults.map(f => (
-                                        <button
-                                            key={f._id}
-                                            type="button"
-                                            onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
-                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
-                                        >
-                                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                                                {f.name[0]}
+                                        <div className="mt-2 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+                                            <div className="max-h-48 overflow-y-auto">
+                                                {searchResults.length > 0 ? (
+                                                    searchResults.map(f => (
+                                                        <button
+                                                            key={f._id}
+                                                            type="button"
+                                                            onClick={() => { setSelectedFarmer(f); setFarmerSearch(''); setSearchResults([]); }}
+                                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-primary/5 transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                                        >
+                                                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                                                                {f.name[0]}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-medium">{f.name}</p>
+                                                                <p className="text-xs text-slate-500">{f.village} · {f.mobile}</p>
+                                                            </div>
+                                                        </button>
+                                                    ))
+                                                ) : (
+                                                    // FIX: hint was rendered outside the dropdown container before
+                                                    <div className="p-3 text-center space-y-1">
+                                                        <p className="text-xs text-slate-500">No farmer found. Keep typing mobile number to add as new.</p>
+                                                        <p className="text-xs text-slate-400">
+                                                            {/^\d{10}$/.test(farmerSearch)
+                                                                ? '✅ 10-digit number detected — new farmer mode activated'
+                                                                : 'Enter a 10-digit mobile number to register a new farmer.'}
+                                                        </p>
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-medium">{f.name}</p>
-                                                <p className="text-xs text-slate-500">{f.village} · {f.mobile}</p>
-                                            </div>
-                                        </button>
-                                    ))
-                                ) : (
-                                    <div className="p-3 text-center text-xs text-slate-500">
-                                        No farmer found. Keep typing mobile number to add as new.
-                                    </div>
-                                )}
-                                {farmerSearch.length >= 2 && searchResults.length === 0 && (
-                                    <p className="text-xs text-slate-400 mt-2 px-1">
-                                        {/^\d{10}$/.test(farmerSearch)
-                                            ? '✅ 10-digit number detected — new farmer mode activated'
-                                            : 'No farmers found. Try a different name or enter a 10-digit mobile.'}
-                                    </p>
-                                )}
                                         </div>
                                     )}
                                 </div>
@@ -522,29 +559,30 @@ const CreateBill = () => {
                                             <tr key={field.id} className="border-t border-slate-100 dark:border-slate-800">
                                                 <td className="px-3 py-2">
                                                     <SearchableSelect
-                                                        products={products}
                                                         value={watchedItems[index]?.productId}
-                                                        onChange={(productId) => {
-                                                            setValue(`items.${index}.productId`, productId);
-                                                            handleProductChange(index, productId);
-                                                        }}
+                                                        initialProduct={watchedItems[index]?.productObj}
+                                                        onChange={(product) => handleProductChange(index, product)}
                                                         placeholder="Select product..."
                                                         className="input text-xs py-1.5 w-full"
+                                                        disabled={!!generatedBill}
                                                     />
                                                 </td>
                                                 <td className="px-3 py-2">
+                                                    {/* FIX: original called register().onChange(e) which returns a new obj each render
+                                                        — now quantity changes go through update() which is atomic and keeps RHF in sync */}
                                                     <input
                                                         type="number"
                                                         min={1}
-                                                        {...register(`items.${index}.quantity`, { min: 1, valueAsNumber: true })}
+                                                        value={watchedItems[index]?.quantity ?? 1}
+                                                        onChange={e => {
+                                                            const val = Math.max(1, Number(e.target.value) || 1);
+                                                            handleQuantityChange(index, val);
+                                                        }}
                                                         onBlur={e => {
                                                             const v = Number(e.target.value);
-                                                            if (!v || v < 1) {
-                                                                setValue(`items.${index}.quantity`, 1);
-                                                                setValue(`items.${index}.total`, watchedItems[index]?.price || 0);
-                                                            }
+                                                            if (!v || v < 1) handleQuantityChange(index, 1);
                                                         }}
-                                                        onChange={e => { handleQuantityChange(index, Number(e.target.value)); register(`items.${index}.quantity`).onChange(e); }}
+                                                        disabled={!!generatedBill}
                                                         className="input text-xs py-1.5 w-16"
                                                     />
                                                 </td>
@@ -552,7 +590,7 @@ const CreateBill = () => {
                                                     <input
                                                         type="number"
                                                         step="0.01"
-                                                        {...register(`items.${index}.price`)}
+                                                        value={watchedItems[index]?.price ?? 0}
                                                         readOnly
                                                         className="input text-xs py-1.5 w-24 bg-slate-100 dark:bg-slate-700"
                                                     />
@@ -597,14 +635,20 @@ const CreateBill = () => {
                                 ))}
                             </div>
 
-                            {/* GST Toggle */}
+                            {/* GST Toggle
+                                FIX: original wrapped a <button> inside a <label> — clicking the button fired
+                                both the button's onClick AND the label's implicit click, toggling twice (net = no change).
+                                Fixed by removing the <label> wrapper and using a plain <div>. */}
                             <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-4">
                                 <div className="flex items-center justify-between flex-wrap gap-3">
-                                    <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-3">
                                         <button
                                             type="button"
+                                            role="switch"
+                                            aria-checked={gstEnabled}
                                             onClick={() => !generatedBill && setGstEnabled(v => !v)}
-                                            className={`relative w-10 h-6 rounded-full transition-colors ${gstEnabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
+                                            disabled={!!generatedBill}
+                                            className={`relative w-10 h-6 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${gstEnabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
                                         >
                                             <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${gstEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
                                         </button>
@@ -612,7 +656,7 @@ const CreateBill = () => {
                                             <p className="text-sm font-semibold">GST Applicable</p>
                                             <p className="text-xs text-slate-400">Enable for taxable goods</p>
                                         </div>
-                                    </label>
+                                    </div>
                                     {gstEnabled && (
                                         <div className="flex items-center gap-1.5">
                                             <span className="text-xs text-slate-500 mr-1">Rate:</span>
@@ -670,7 +714,7 @@ const CreateBill = () => {
                         </div>
                     </div>
 
-                    {/* ── Right: Summary + Actions ─────────────────────────── */}
+                    {/* ── Right: Summary + Actions ──────────────────────────── */}
                     <div>
                         <div className="card p-5 xl:sticky xl:top-24">
                             <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
@@ -683,7 +727,7 @@ const CreateBill = () => {
                                 <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
                                     <p className="text-xs text-slate-500 mb-0.5">Bill To</p>
                                     <p className="font-bold text-sm">{selectedFarmer?.name || watch('newFarmer.name')}</p>
-                                    {kannadaName && <p className="text-xs text-slate-500">{kannadaName}</p>}
+                                    {kannadaState.name && <p className="text-xs text-slate-500">{kannadaState.name}</p>}
                                     <p className="text-xs text-slate-400">{selectedFarmer?.village || 'New Farmer'}</p>
                                 </div>
                             )}
@@ -749,7 +793,10 @@ const CreateBill = () => {
                                     <div className="space-y-2 animate-fade-in">
                                         <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-2">
                                             <span className="material-symbols-outlined text-emerald-600" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                                            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Bill Created!</p>
+                                            <div>
+                                                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Bill #{generatedBill.billNumber} Created!</p>
+                                                <p className="text-xs text-emerald-600 dark:text-emerald-500">{formatCurrency(generatedBill.totalAmount)}</p>
+                                            </div>
                                         </div>
                                         <button type="button" onClick={handleViewPDF} disabled={pdfLoading} className="btn-primary w-full">
                                             {pdfLoading
@@ -775,7 +822,7 @@ const CreateBill = () => {
                 </div>
             </form>
 
-            {/* ── Review Modal ─────────────────────────────────────────────── */}
+            {/* ── Review Modal ──────────────────────────────────────────────── */}
             {reviewData && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
                     <div className="card w-full max-w-lg p-6 shadow-2xl flex flex-col gap-5 max-h-[90vh] overflow-y-auto animate-slide-up">
@@ -800,7 +847,7 @@ const CreateBill = () => {
                             </div>
                         </div>
 
-                        {/* Items */}
+                        {/* Items — FIX: use validItems directly, not re-filter items */}
                         <div className="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
                             <div className="max-h-52 overflow-auto">
                                 <table className="w-full text-left">
@@ -813,8 +860,8 @@ const CreateBill = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {reviewData.items.filter(i => i.productId).map((item, idx) => {
-                                            const prod = products.find(p => p._id === item.productId);
+                                        {reviewData.validItems.map((item, idx) => {
+                                            const prod = item.productObj;
                                             return (
                                                 <tr key={idx}>
                                                     <td className="px-4 py-2 text-sm font-medium">{prod?.name || 'Product'}</td>

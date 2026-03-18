@@ -181,12 +181,12 @@ const styles = StyleSheet.create({
     },
 
     // Column widths
-    colSN:      { width: '6%',  paddingHorizontal: 8, textAlign: 'center' },
-    colProduct: { width: '44%', paddingHorizontal: 8 },
+    colSN:      { width: '8%',  paddingHorizontal: 8, textAlign: 'center' },
+    colProduct: { flex: 1, paddingHorizontal: 8 },
     colQty:     { width: '10%', paddingHorizontal: 8, textAlign: 'center' },
     colHSN:     { width: '12%', paddingHorizontal: 8, textAlign: 'center' },
-    colRate:    { width: '14%', paddingHorizontal: 8, textAlign: 'right' },
-    colAmount:  { width: '14%', paddingHorizontal: 8, textAlign: 'right' },
+    colRate:    { width: '16%', paddingHorizontal: 8, textAlign: 'right' },
+    colAmount:  { width: '16%', paddingHorizontal: 8, textAlign: 'right' },
 
     // ── Totals Block ─────────────────────────────────────────────────────────
     totalsWrapper: {

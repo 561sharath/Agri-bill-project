@@ -1,23 +1,62 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import TruncatedText from './TruncatedText';
+import { productsAPI } from '../services/api';
+import useDebounce from '../hooks/useDebounce';
 
 /**
- * Dropdown that looks like the existing select (same UI) with search inside.
- * products: [{ _id, name, stock }], value: productId, onChange: (productId) => void
+ * Dropdown that fetches products infinitely from the API.
+ * value: productId (optional, for tracking selection)
+ * onChange: (productObj) => void
+ * initialProduct: { _id, name, stock } (optional, to display Name before fetching)
  */
-export default function SearchableSelect({ products = [], value, onChange, className = '', placeholder = 'Select product...' }) {
+export default function SearchableSelect({ value, onChange, initialProduct, className = '', placeholder = 'Select product...', disabled = false }) {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState('');
+    const [options, setOptions] = useState([]);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState(initialProduct || null);
+    
     const wrapperRef = useRef(null);
     const [dropdownRect, setDropdownRect] = useState(null);
+    const debouncedSearch = useDebounce(search, 400);
 
-    const selected = products.find(p => (p._id && value) && String(p._id) === String(value));
-    const displayText = selected ? `${selected.name} (Stock: ${selected.stock})` : placeholder;
-    const filtered = !search.trim()
-        ? products
-        : products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
+    const fetchProducts = useCallback(async (query, pageNum, append) => {
+        setLoading(true);
+        try {
+            const res = await productsAPI.getAll({ search: query, page: pageNum, limit: 15 });
+            const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+            const total = res.data?.totalPages || 1;
+            
+            setOptions(prev => append ? [...prev, ...data] : data);
+            setHasMore(pageNum < total);
+        } catch (err) {
+            console.error('Failed to fetch products for select', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
+    // Fetch when search changes or dropdown opens
+    useEffect(() => {
+        if (!open) return;
+        setPage(1);
+        fetchProducts(debouncedSearch, 1, false);
+    }, [debouncedSearch, open, fetchProducts]);
+
+    // Handle scroll for infinite loading
+    const handleScroll = (e) => {
+        const bottom = e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight < 20;
+        if (bottom && hasMore && !loading) {
+            const nextPage = page + 1;
+            setPage(nextPage);
+            fetchProducts(debouncedSearch, nextPage, true);
+        }
+    };
+
+    // Click outside
     useEffect(() => {
         const handleClickOutside = (e) => {
             if (wrapperRef.current && wrapperRef.current.contains(e.target)) return;
@@ -28,6 +67,7 @@ export default function SearchableSelect({ products = [], value, onChange, class
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Positioning
     useEffect(() => {
         if (open && wrapperRef.current) {
             const rect = wrapperRef.current.getBoundingClientRect();
@@ -38,19 +78,29 @@ export default function SearchableSelect({ products = [], value, onChange, class
     }, [open]);
 
     const handleSelect = (product) => {
-        onChange(product._id);
+        if (Number(product.stock) <= 0) return;
+        setSelectedProduct(product);
+        onChange(product); // Pass full product up!
         setSearch('');
         setOpen(false);
     };
 
     const triggerClass = className ? `${className} cursor-pointer flex items-center justify-between overflow-hidden gap-2` : 'input text-xs py-1.5 w-full cursor-pointer flex items-center justify-between overflow-hidden gap-2';
 
+    // Figure out what to show when closed
+    let displayProduct = selectedProduct;
+    if (!displayProduct && value) {
+        displayProduct = options.find(o => String(o._id) === String(value)) || null;
+    }
+    const displayText = displayProduct ? `${displayProduct.name} (Stock: ${displayProduct.stock})` : placeholder;
+
     return (
         <div ref={wrapperRef} className="relative w-full">
             <button
                 type="button"
-                onClick={() => setOpen(!open)}
-                className={`${triggerClass} text-left`}
+                onClick={() => !disabled && setOpen(!open)}
+                disabled={disabled}
+                className={`${triggerClass} text-left ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
                 <div className="flex-1 min-w-0">
                     <TruncatedText text={displayText} className="font-medium" />
@@ -73,19 +123,31 @@ export default function SearchableSelect({ products = [], value, onChange, class
                             autoFocus
                         />
                     </div>
-                    <ul className="max-h-52 overflow-y-auto overflow-x-hidden py-0.5 overscroll-contain touch-none min-h-0">
-                        {filtered.length === 0 ? (
+                    <ul 
+                        className="max-h-52 overflow-y-auto overflow-x-hidden py-0.5 overscroll-contain touch-none min-h-0 relative"
+                        onScroll={handleScroll}
+                    >
+                        {options.length === 0 && !loading ? (
                             <li className="px-3 py-2 text-xs text-slate-500">No product found</li>
                         ) : (
-                            filtered.map((p) => (
-                                <li
-                                    key={p._id}
-                                    onClick={() => handleSelect(p)}
-                                    className="px-3 py-2 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center"
-                                >
-                                    <TruncatedText text={`${p.name} (Stock: ${p.stock})`} />
-                                </li>
-                            ))
+                            options.map((p) => {
+                                const outOfStock = Number(p.stock) <= 0;
+                                return (
+                                    <li
+                                        key={p._id}
+                                        onClick={() => handleSelect(p)}
+                                        className={`px-3 py-2 text-xs flex items-center ${outOfStock ? 'opacity-50 cursor-not-allowed bg-red-50/50 dark:bg-red-900/10' : 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                                        title={outOfStock ? 'Out of stock' : ''}
+                                    >
+                                        <TruncatedText text={`${p.name} (Stock: ${p.stock})`} />
+                                    </li>
+                                );
+                            })
+                        )}
+                        {loading && (
+                            <li className="px-3 py-2 text-xs text-slate-400 text-center animate-pulse">
+                                Loading...
+                            </li>
                         )}
                     </ul>
                 </div>,
@@ -94,4 +156,3 @@ export default function SearchableSelect({ products = [], value, onChange, class
         </div>
     );
 }
-
