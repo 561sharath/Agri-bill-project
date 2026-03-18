@@ -4,7 +4,7 @@ import User from '../models/User.js';
 // Generate JWT
 const generateToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET || 'fallback_secret', {
-        expiresIn: '30d',
+        expiresIn: '24h',
     });
 };
 
